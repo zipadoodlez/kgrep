@@ -1,118 +1,104 @@
 # graphgrep
 
-One Rust tool for how an agent finds its way around a codebase.
+One shaper for how an agent finds its way around a codebase, built so that
+memory stays flat no matter how large the repository is.
 
 ## What this is
 
-graphgrep fuses two existing tools into a single slim form factor:
+A single tool for the questions agents ask constantly: where is X defined, who
+calls X, what is inside this file, which files are about this topic. It answers
+with a **packet**: ranked, structured, budgeted, and carrying its reasons, so the
+agent can act on one call instead of ten.
 
-- **[agentgrep](https://github.com/1jehuang/agentgrep)** — Rust, index-free lexical
-  search for agents: `grep`, `find`, `outline`, `trace`. One-shot, daemon-free,
-  returns a compact structured packet instead of raw match noise.
-- **[graphify](https://github.com/Graphify-Labs/graphify)** — Python, builds a
-  persistent knowledge graph from source: extract (tree-sitter) → build →
-  cluster → analyze → report, then answers structural questions (god nodes,
-  communities, paths, neighbours).
+Behind that one interface sit several **sources** of evidence. Each is
+independently useful, each is optional, and each must be streaming and bounded
+to be allowed in.
 
-Both answer the same agent question: *where is X, and what connects it to Y.*
-agentgrep answers it lexically and instantly; graphify answers it structurally
-and durably. graphgrep is the grain of each, in one crate.
+| Source | Answers | Cost |
+|---|---|---|
+| Lexical scan | exact text and regex | none, always available |
+| tree-sitter outline | structure, nesting, symbols | bounded per file |
+| Tag index | where is X defined | one mmapped file |
+| mmapped n-gram index | fast regex on huge repos | mmapped, evictable |
+| Graph | what is central, what clusters, how things link | optional artifact |
+| LSP (via MCP only) | exact references and implementations | never ours to run |
 
-The end goal is to replace the `agentgrep` dependency inside **kcode** with
-graphgrep, refactoring kcode's integration site wherever graphgrep's shape is
-the cleaner one. What is fixed is kcode's behaviour, not agentgrep's API. kcode
-keeps agentgrep until graphgrep is complete and tested; the swap is the last
-step, not the first.
+The shaper is ours and is the product. The sources are interchangeable.
 
-### How the two halves arrive
+## The hard constraint: memory
 
-Asymmetric effort, and it matters:
+This is the differentiator, not a detail. Other harnesses and other indexes hold
+the codebase in RAM. We do not. Every design decision is judged by capability
+per byte.
 
-- **agentgrep is already Rust.** It is not ported, it is *absorbed*: vendor its
-  `src/` as the lexical core and reshape it onto the core representation below.
-  It compiles today and has a real consumer, so this half is low risk.
-- **graphify is Python.** Its grain is *ported* to Rust. This is the only real
-  Rust-writing work, and it is small if scope is fixed before the port starts.
+**The rules:**
 
-## Philosophy
+1. **Nothing resident.** Work is per file and the memory is released per file.
+2. **Peak memory may scale with the largest file, never with the repository.**
+   A hundred-file repo and a half-million-file repo must peak at the same place.
+3. **Any persistent artifact is mmapped, never deserialized.** Touch only the
+   lookup table and read the payload off disk by offset, so the OS pages it in
+   and can evict it under pressure. Never build a `Vec` of the whole index or the
+   whole graph.
+4. **Bounded results.** Ranked output keeps a bounded top-K. No tool collects
+   every match before sorting.
+5. **No language servers and no embedding models in-process.** A language server
+   is hundreds of megabytes to gigabytes and would dwarf the entire harness.
+   Embeddings carry a model. Both are excluded. LSP is consumed over MCP, if and
+   only if the user already runs one.
+6. **Every tool call has a memory budget.** Exceeding it truncates or spills. It
+   never grows unbounded.
 
-Two skills govern all work here. Both are always on.
+The last one is what makes the claim testable: a search over a huge repo must
+not allocate in proportion to the repo.
 
-**Ponytail** governs the diff: stdlib over custom, one line over fifty, delete
-over add. The laziest thing that actually works.
+## The shaper
 
-**Zonytail** governs the codebase: one obvious home per concept, legible blast
-radius, uniformity, locality of reasoning, a small sharp core. Centralize
-representation, localize behaviour. Default local. Couple on change, not on
-looks. The ratchet points one way: leave it cheaper than you found it.
+One interface, whatever is behind it.
 
-They pull opposite ways on purpose. When they conflict, zonytail decides *where*
-code lives and *what shape the codebase is*; ponytail decides how much of it
-there is. Neither ever lowers the bar on understanding: read the region fully,
-trace it end to end, then move.
+- **Query** in. Lexical terms, a path query, a file to outline, or a structural
+  intent (subject, relation, support).
+- **Packet** out. Ranked hits, trimmed to budget, text and JSON, each hit
+  carrying the reasons it ranked where it did.
 
-**Capability is fixed.** We reach a slim form factor by cutting *husk*, never by
-cutting what the tool must do. An elegant tool that can no longer answer the
-questions agents actually ask is a smaller broken thing.
+`grep`, `find`, `outline`, and `trace` are thin constructors over `Query`, not
+four parallel implementations. One way in, one way out, however many front doors.
 
-## The core idea
+## Origin: what comes from where
 
-One query surface, two backends behind it. `docs/DESIGN.md` holds the longer
-form of this: how the two halves synergize, and how the graph cache is meant to
-build itself. This file stays the settled truth; that one is the aim.
+- **agentgrep is absorbed (code).** It is already Rust, so its source is taken,
+  reshaped onto the shaper, and its memory spikes removed. Its MIT notice follows
+  it.
+- **graphify is ideas only (no code).** We take the concepts: edge confidence
+  (`EXTRACTED`/`INFERRED`/`AMBIGUOUS`), god nodes, communities. We write our own
+  extraction, driven by **tree-sitter queries**, one small file per language.
+  This is the approach aider already ships, and it replaces graphify's thousands
+  of lines of hand-walking and cross-file resolution.
 
-- **Lexical backend** — agentgrep's index-free scan. Always available, instant,
-  no setup. This is the floor.
-- **Graph backend** — graphify's extracted graph, persisted on disk. Used when
-  the graph exists and is fresh; it upgrades an answer from "these files match"
-  to "this is the structure and here is the shortest path between the two".
-
-A query picks the best backend it can afford, and degrades to lexical when the
-graph is absent or stale. The graph is an *upgrade*, never a prerequisite. No
-command may require the graph to exist in order to work.
-
-### The small sharp core
-
-Shared representations, one home each. Everything else stays boringly local.
-
-- **Node** — a symbol or file with an identity and a source location.
-- **Edge** — a typed relation (`calls`, `imports`, `uses`, …) with a confidence
-  (`EXTRACTED` | `INFERRED` | `AMBIGUOUS`).
-- **Graph** — nodes + edges + communities. One representation, not one per
-  stage.
-- **Query** — lexical terms or structural intent (subject/relation/support).
-- **Packet** — the ranked, compact result an agent reads. Text and JSON.
-
-The pipeline stages (`build`, `cluster`, `analyze`) are operations over the
-graph, not owners of it. If a stage needs a second graph representation, that is
-the god module being born: stop and fix the seam.
+Neither upstream is ours. Attribution is owed and is deferred, not optional. See
+Decisions.
 
 ## Scope: grain and husk
-
-Cut deliberately, region by region. Start from the core representation.
 
 **Keep (grain):**
 
 - Lexical search, ranking, symbol grouping, outline, the trace DSL.
-- tree-sitter extraction for the languages agents actually meet, with a
-  call-graph second pass.
-- The graph pipeline: build, cluster, analyze (god nodes, communities, paths,
-  neighbours, cycles, diff).
-- Structured graph query over the persisted graph.
-- Compact text + JSON packets for every command.
+- The shaper: `Query`, `Hit`, `Packet`, budgets, reasons, text and JSON.
+- tree-sitter extraction for the languages agents actually meet, via queries.
+- A memory-mapped index for lexical scaling, later.
+- A memory-mapped graph artifact, last and optional.
 
 **Cut (husk) unless proven load-bearing:**
 
-- The long tail of niche extractors (terraform, verilog, fortran, powershell,
-  commonlisp, …). Add a language when a real user needs it, not to hit parity.
-- LLM-based extraction and semantic cleanup. Lexical + AST covers the floor.
-- Installers, hooks, editor wiring, `install.py`, `hooks.py`.
-- MCP/HTTP servers, watch mode, HTML/callflow/canvas/SVG/wiki exporters.
+- Language servers in-process, embedding models, vector stores.
+- Installers, hooks managers, editor wiring, MCP/HTTP servers, watch mode,
+  HTML/callflow/canvas/SVG/wiki exporters.
 - Video, PDF, Office, Google Workspace, URL ingest.
-- `Prs`, `serve`, `cache` and other machinery around the hot path.
+- The long tail of niche extractors. Add a language when a real user needs it.
+- Any resident structure proportional to repository size.
 
-Every "keep" is a capability contract. Every "cut" is a reversible decision: a
-cut feature can return as a small operation over the core if it proves itself.
+Every "keep" is a capability contract. Every "cut" is reversible: a cut feature
+can return as a bounded source over the shaper if it proves itself.
 
 ## Consumers and the kcode seam
 
@@ -135,49 +121,40 @@ Its wrapper lives in `kcode/crates/jcode-app-core/src/tool/agentgrep.rs` (+
 
 **kcode is in scope to refactor.** We do not preserve agentgrep's API shape for
 its own sake. If a cleaner graphgrep API makes kcode's integration site simpler
-too, change both. The refactor is real but bounded: the agentgrep integration
-site, not the rest of kcode.
+too, change both, bounded to that integration site.
 
-**No dependency swap until graphgrep is done and tested.** kcode keeps its
-agentgrep dependency throughout. Repointing it at graphgrep is the last step,
-after graphgrep is complete and its tests pass.
+**No dependency swap until graphgrep is done and tested.** kcode keeps agentgrep
+throughout. Repointing it is the last step.
 
 ### Clean core, thin CLI
 
-Inside graphgrep there is one shape: a `Query` in, a `Packet` out. `grep`,
-`find`, `outline`, and `trace` are thin constructors over that core, not four
-parallel implementations. The CLI keeps those four verbs for humans and
-scripts; kcode calls the core API directly. One way in, one way out, however
-many front doors.
+Inside graphgrep there is one shape: a `Query` in, a `Packet` out. The CLI keeps
+`grep`, `find`, `outline`, `trace` for humans and scripts; kcode calls the core
+API directly.
 
 ### Parity while kcode is untouched
 
 Because the swap is deferred, parity with agentgrep is proven independently:
 graphgrep's own tests, plus a differential check that runs agentgrep and
-graphgrep over the same corpus and compares output. Absorbing code without a
-real oracle is how silent regressions land.
+graphgrep over the same corpus and compares output. Absorbing code without a real
+oracle is how silent regressions land.
 
 ## Layout
-
-The crate does not exist yet. This is the intended shape; let structure emerge
-from the core, do not pre-create empty modules.
 
 ```
 src/
   lib.rs        // the public API kcode embeds
-  model.rs      // the core: Node, Edge, Confidence, Graph, Query, Packet
-  cli.rs        // clap surface: grep | find | outline | trace | graph *
+  model.rs      // the core: Node, Edge, Confidence, Query, Hit, Packet
+  cli.rs        // clap surface: grep | find | outline | trace
   scan.rs       // file walking, ignore rules, candidate collection
   lexical.rs    // grep matching, find ranking, symbol grouping
-  outline.rs    // known-file structural scan
-  extract/      // tree-sitter -> nodes/edges, one file per language
-  graph/        // build, cluster, analyze, query over the core graph
-  packet.rs     // ranking + text/json rendering
+  outline.rs    // file structure, tree-sitter query driven
+  packet.rs     // ranking, budgets, text and JSON rendering
 ```
 
-## Commands
+Let structure emerge from the core. Do not pre-create empty modules.
 
-Standard Rust, no exotic tooling:
+## Commands
 
 ```bash
 cargo build            # debug build
@@ -187,46 +164,44 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-These become real with the first code commit. Until then AGENTS.md is the only
-source of truth for intent.
-
 ## Working rules for agents
 
-- **Read before you claim.** A structural claim is not a fact until you have
-  read the code behind it. Never dress a guess as a finding.
-- **Finish what you start.** Half-migrated is the most expensive state there
-  is. Cut a pass to what you will complete, ship it whole.
-- **One home per concept.** Before adding a new module, path, or representation,
-  find whether the canonical home already exists. A parallel path is how a
-  codebase grows a second way to do everything.
+- **Memory is the product.** Any change that makes peak memory scale with repo
+  size is a regression, however fast or neat it is.
+- **Read before you claim.** A structural claim is not a fact until you have read
+  the code behind it. Never dress a guess as a finding.
+- **Finish what you start.** Half-migrated is the most expensive state there is.
+- **One home per concept.** Before adding a module, path, or representation, find
+  whether the canonical home already exists.
 - **No capability regressions.** Do not delete what the system needs to do to
   make a file smaller.
 - **No artifacts, no state.** You read the code fresh; the structure is the
-  memory. Keep docs (including this file) in sync, not aspirational.
+  memory. Keep docs in sync, not aspirational.
 - **Commit as you go.** Small, whole, working commits.
 
 ## Decisions
 
 Settled:
 
-1. **Language: Rust.** One crate, one binary. The Python side is a source to
-   read, not a runtime to keep.
-2. **API: clean core, refactor kcode.** One `Query`/`Packet` core. The four CLI
-   verbs are thin constructors over it, and kcode's integration site is
-   refactored onto the same core when graphgrep is ready.
-3. **No dependency swap until done.** kcode keeps agentgrep until graphgrep is
-   complete and tested. Parity is proven by tests plus a differential run
-   against agentgrep.
-4. **Extraction languages, initial set:** Rust, Python, TypeScript/JavaScript,
+1. **Language: Rust.** One crate, one binary.
+2. **Shape: one shaper, pluggable sources.** Not two tools glued together.
+3. **Memory: flat with respect to repository size.** The differentiator.
+4. **No language servers or embedding models in-process.** LSP is consumed via
+   MCP only, if the user already has one.
+5. **graphify contributes ideas, not code.** Extraction is our own, via
+   tree-sitter queries.
+6. **agentgrep contributes code**, absorbed and reshaped.
+7. **No dependency swap until done.** kcode keeps agentgrep until graphgrep is
+   complete and tested, proven by a differential run.
+8. **Extraction languages, initial set:** Rust, Python, TypeScript/JavaScript,
    Go. More on demand, never for parity's sake.
 
 Open:
 
-5. **Graph freshness.** How stale is too stale to prefer the graph backend over
-   lexical. Decide when the graph backend lands.
-6. **Attribution (deferred, not optional).** Neither upstream is ours.
-   agentgrep is MIT (`1jehuang`); graphify is Apache-2.0 (`Safi Shamsi and the
-   Graphify contributors`). Absorbing agentgrep's source and porting graphify's
-   design both make graphgrep a derivative work, so a `NOTICE`/`LICENSE`
-   attribution is owed. Deferred to the end of the build by choice, but it must
-   land before graphgrep is released or pointed at by kcode.
+9. **Graph freshness.** How stale is too stale to prefer the graph over lexical.
+   Decide when the graph source lands.
+10. **Attribution (deferred, not optional).** agentgrep is MIT (`1jehuang`);
+    graphify is Apache-2.0 (`Safi Shamsi and the Graphify contributors`).
+    Absorbing agentgrep's source makes graphgrep a derivative work of it, so its
+    notice is owed. Must land before graphgrep is released or pointed at by
+    kcode.

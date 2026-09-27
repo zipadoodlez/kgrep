@@ -4,6 +4,22 @@ Direction, not decisions. `AGENTS.md` holds what is settled; this file holds wha
 we are aiming at and why. If the two ever disagree, AGENTS.md wins and this file
 is out of date.
 
+> **Revised 2026-09-27.** The framing moved from "fuse two tools" to **one shaper
+> with pluggable sources**, and the binding constraint became **flat memory with
+> respect to repository size**. The graph is now source three of several, not half
+> the product. The sections below on how the halves synergize remain useful as the
+> long-term direction, but the build order at the bottom is the current plan.
+
+## The hard constraint: memory
+
+See `AGENTS.md` for the rules. In one line: **capability may grow with repository
+size, memory may not.**
+
+The consequence for everything below is that a source is only allowed in if it is
+streaming and bounded, and any persisted artifact is mmapped and queried by
+offset rather than deserialized. Cursor's regex index is the one shipped example
+of doing this deliberately; we adopt it for memory rather than for latency.
+
 ## The cache: the map that builds itself
 
 ### The shape
@@ -135,12 +151,28 @@ The graph is that walk with the links filled in.
 
 ## Build order
 
-Do not build the unified walk first. Prove the idea with the cheap cross-feeds
-and let the unified engine be the conclusion, not the premise.
+Do not build the unified walk or the graph first. Each earlier step must be
+independently useful and must not raise peak memory.
 
-1. **Structural re-rank of lexical hits.** Keep lexical exactly as it is, then
-   reorder what it found using the map. If real answers improve, the thesis
-   holds, and nothing that currently works is touched.
-2. **Lexical edges into the map.** Find the relations hidden in quoted names and
-   draw them in. Measure how many holes this fills.
-3. **Only then, the single walk.**
+1. **The shaper.** `Query` in, `Packet` out. The four CLI verbs become
+   constructors over it. Absorb agentgrep's lexical code here and reshape it.
+2. **Remove the memory spikes in the code being absorbed.** One fused pass per
+   file instead of several, no whole-file lowercased copy, no whole-file line
+   vector, and a bounded top-K instead of collecting every match before sorting.
+   This is a free win, and it is the first proof of the memory thesis.
+3. **A real tree-sitter outline**, replacing the regex line-scanner, driven by a
+   small query file per language. Bounded per file, tree dropped immediately.
+   This is where nesting and zoom arrive, and it costs no resident memory.
+4. **A tag index** for go-to-definition: one mmapped file, name to location.
+   Nearly free, and it is ctags without a process.
+5. **An mmapped sparse n-gram index** for lexical scaling on large repos.
+   Cursor's published design, adopted for memory rather than latency. This is the
+   "best in the world" claim.
+6. **The graph, last**, as an mmapped artifact queried on demand, answering only
+   the architectural questions: what is central, what clusters, how things link.
+
+Explicitly not built: language servers in-process, embedding models, vector
+stores, and any resident structure proportional to repository size.
+
+Steps 1 and 2 can be one milestone. Steps 3 to 6 are each optional and each
+shippable on their own, and none of them may raise peak memory.
