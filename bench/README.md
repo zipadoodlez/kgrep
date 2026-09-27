@@ -55,31 +55,56 @@ Excluding the two deliberately generic queries (`grep-swarm-stress`,
 
 ## What this tells us
 
+> **Correction, same day. The max-output claim below is wrong for the harness
+> path and is retained only to show the mistake.** This benchmark drives the
+> **CLI**, which renders with no cap. jcode does not use the CLI: it calls
+> `run_grep` and renders with `render_grep_output(..., Some(200))`, capping
+> displayed matches at 200 and reporting the true total in the header. The model
+> never sees 154k tokens of grep output. The 154k number describes a path the
+> harness never takes. See "Where the guard actually lives" below.
+
 **1. Recall is not the problem.** Both tools find the answer on every task. Any
 project that only claims "we find it too" has no case.
 
 **2. Specific queries are already good.** Median 383 tokens to the answer is a
-reasonable price, and both tools pay it.
+reasonable price, and both tools pay it. The cap does not bind on these, so this
+holds on the harness path too.
 
-**3. Generic queries are catastrophic, and it is the same in both tools.**
-Searching for `swarm` produces **154,351 tokens of output** and takes **93,943
-tokens** to reach the answer. That is larger than a full context window, for one
-query, and it is the single worst thing either tool does. `todo` costs 79,038.
+**3. (Retracted) Generic queries are catastrophic.** The CLI dumps 154,351 tokens
+for `swarm`, but that is the uncapped CLI path. Re-measurement through a
+harness-faithful path is required before any claim about what the model sees.
 
-This is the measured version of a gap we had only reasoned about: **there is no
-budget on the output, only on matches.** Both tools answer a generic query by
-dumping everything they found.
-
-**4. It also means the mean is a lie.** 6,340 mean tokens is two outliers
-dragging fourteen good results. Median and p90 belong in the report, not the
-mean.
+**4. The mean is still a lie.** Even where outliers are real, a mean dominated by
+two tasks misrepresents the distribution. Median and p90 belong in the report.
 
 **5. graphgrep matches agentgrep to within one token per task**, which is what
 absorption should look like and is the first evidence the port is faithful.
 
-## The first thing to build
+## Where the guard actually lives
 
-**A token budget on the packet.** Not a match cap, a token cap: the shaper
-should stop, report what it dropped, and say so, rather than returning 154k
-tokens. This is measurable with the harness that now exists, so it can be proven
-better rather than asserted.
+jcode already hit this problem and fixed it in the harness:
+
+```rust
+// ... a search for a common key across 2,027 benchmark transcripts produced
+// 923k chars in a single call. The header still reports the true total ...
+let max_regions = params.max_regions.or(Some(DEFAULT_GREP_MAX_REGIONS));  // 200
+```
+
+Two consequences, and the second is the real finding:
+
+1. **The benchmark must mirror this path.** A bench binary that links agentgrep
+   and calls `run_grep` then `render_grep_output(Some(200))` is the only honest
+   oracle for what a model sees. The CLI is not.
+2. **The guard is in the wrong home.** It lives in the caller, so every consumer
+   must remember to pass it. That is exactly why the CLI omits it, and why a new
+   caller would reintroduce the 923k-character bug. A safety default belongs in
+   the library, where it cannot be forgotten. That is a real improvement, and a
+   different one from "add a budget that does not exist".
+
+## The first thing to build (revised)
+
+**Move the output cap into the library default**, so the bounded packet is what
+you get without asking, and `--unbounded` (or an explicit `Budget`) is the
+deliberate opt-out. Then re-measure through a harness-faithful bench binary and
+require that recall does not regress.
+
