@@ -1,18 +1,74 @@
 use clap::Parser;
 use graphgrep::cli::{Cli, Command};
+use graphgrep::model::Budget;
+use graphgrep::{lexical, outline, packet, peak};
+use std::path::PathBuf;
+
+fn resolve_root(path: &Option<String>) -> PathBuf {
+    match path {
+        Some(path) => PathBuf::from(path),
+        None => std::env::current_dir().expect("current directory"),
+    }
+}
 
 fn main() {
     let cli = Cli::parse();
 
-    let verb = match &cli.command {
-        Command::Grep(_) => "grep",
-        Command::Find(_) => "find",
-        Command::Outline(_) => "outline",
-        Command::Trace(_) => "trace",
+    let exit = match &cli.command {
+        Command::Grep(args) => {
+            let root = resolve_root(&args.scope.path);
+            match lexical::run_grep(&root, args, Budget::default()) {
+                Ok(packet) => {
+                    if args.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&packet::grep_json(&packet))
+                                .expect("serialize grep json")
+                        );
+                    } else {
+                        println!("{}", packet::render_grep_text(&packet, args));
+                    }
+                    0
+                }
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    2
+                }
+            }
+        }
+        Command::Outline(args) => {
+            let root = resolve_root(&args.scope.path);
+            match outline::run_outline(&root, args) {
+                Ok(result) => {
+                    if args.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&packet::outline_json(&result))
+                                .expect("serialize outline json")
+                        );
+                    } else {
+                        println!("{}", packet::render_outline_text(&result));
+                    }
+                    0
+                }
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    2
+                }
+            }
+        }
+        Command::Find(_) => {
+            eprintln!("error: `find` is not implemented yet");
+            2
+        }
+        Command::Trace(_) => {
+            eprintln!("error: `trace` is not implemented yet");
+            2
+        }
     };
 
-    // The pipeline lands next; until then every verb fails loudly rather than
-    // pretending to have looked.
-    eprintln!("error: `{verb}` is not implemented yet");
-    std::process::exit(2);
+    peak::report_if_requested();
+    if exit != 0 {
+        std::process::exit(exit);
+    }
 }
