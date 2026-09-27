@@ -13,6 +13,8 @@ code actually is, and what comes next. `docs/` holds the longer reasoning.
 - `docs/DESIGN.md` — the shaper, the cache, and the levels of synergy.
 - `docs/SOTA.md` — how every other harness retrieves code, with sources.
 - `docs/AGENTGREP.md` — the tool we absorb, and the weaknesses we inherit.
+- `docs/INTEGRATION.md` — the kcode seam: what it is today, and the five decisions
+  the swap turns on. A proposal; the facts in it are read from the kcode tree.
 - `bench/README.md` — the benchmark, the baseline, and one retracted claim.
 
 ## What this is
