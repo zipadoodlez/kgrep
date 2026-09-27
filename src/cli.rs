@@ -76,6 +76,21 @@ pub struct GrepArgs {
     /// Print only matching file paths.
     #[arg(long)]
     pub paths_only: bool,
+
+    /// Maximum estimated tokens of match detail, across all files. File names
+    /// are not charged, so coverage survives whatever this is set to, up to the
+    /// separate cap on how many files are listed at all.
+    #[arg(long = "max-tokens")]
+    pub max_tokens: Option<usize>,
+
+    /// Maximum matching files listed. Beyond this the packet reports the true
+    /// total and stops naming them.
+    #[arg(long = "max-hits")]
+    pub max_hits: Option<usize>,
+
+    /// Do not bound the packet. For scripts that genuinely want everything.
+    #[arg(long)]
+    pub unbounded: bool,
 }
 
 #[derive(Debug, Clone, Parser)]

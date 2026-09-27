@@ -215,48 +215,43 @@ evidence, and every stage must be independently useful.
 A stage is two to four sessions of work. Order matters where noted, and the
 reasons are stated so a later reader can disagree with them on the merits.
 
-### Stage 1 — bound the packet, in parallel (next)
+### Stage 1 — bound the packet, in parallel (done)
 
-Three things, in this order, because the first informs the second and the second
-must not be built twice.
+All three parts landed, and the exit criteria are met. See `bench/README.md`.
 
-**1a. Declare the numbers.** Done, see `bench/README.md`. kcode costs 5.5 MB with
-a light query and 12.6 MB with a heavy one; process baseline is about 4.8 MB. But
-memory is **not flat**: the file walk materializes the whole file list at roughly
-**268 bytes per file**, which is the one term that scales with the repository.
-Provisional ceiling: **32 MB peak for any repository up to 100,000 files**.
+**1a. The numbers.** Done. kcode costs 5.5 MB light and 12.6 MB heavy; process
+baseline about 4.8 MB. Memory was **not flat**: the walk materialized the file
+list at roughly 268 bytes per file. Ceiling declared at 32 MB for repositories up
+to 100,000 files.
 
-**1b. Decide the ranking signal.** Done, see `bench/README.md`. Four cheap signals
-(path, symbol labels, specificity, role) were measured separately and together.
-Together they are **3.8x better on median tokens-to-answer** (383 to 101) and 2.5x
-on p90, at no latency cost, so they are now the default. Two findings worth
-keeping: specificity is *worse than nothing* on its own, and the three per-task
+**1b. The ranking signal.** Done. Four cheap signals together are **3.8x better on
+median tokens-to-answer** (383 to 101) and 2.5x on p90, at no latency cost. Two
+findings: specificity is *worse than nothing* on its own, and the three per-task
 regressions all trace to the structure sketch not parsing struct fields, so they
-should close when Stage 4 lands rather than being fixed by tuning weights.
+should close when Stage 4 lands.
 
-**1c. Stream the walk, in parallel, with a bounded packet.** Three fixes that are
-one change, which is why they are grouped:
+**1c. Stream, parallelize, bound.** Done, as one change.
 
-- **Stream the walk.** `ignore`'s parallel walker yields entries instead of
-  collecting them, removing the 268-bytes-per-file term. This is the only known
-  growth in the tool that scales with repository size.
-- **Parallelize.** `build_parallel` also supplies the threading whose absence is
-  the measured 2.2x latency regression.
-- **Bound the packet.** Token-denominated budget; rank, then spend; cut detail
-  before coverage; keep true totals; an explicit unbounded opt-out. Parallel
-  workers each hold a bounded top-K, merged at the end.
+- **Streamed**, so the file list is gone: the per-file term fell from 268 bytes to
+  about 40.
+- **Parallel**, so the latency regression reversed: 18.1 ms against agentgrep's
+  21.5 ms.
+- **Bounded**, in two places, because there were two unbounded terms: detail by
+  an estimated token budget, and coverage by a cap on listed files. Both report
+  the truth rather than hiding it. Worst-case output fell **9.6x**, from 154,351
+  tokens to 16,061, with recall unchanged and median cost untouched.
 
-Streaming, parallelism, and bounding cannot be done separately without doing one
-of them twice: a collected list is what makes chunking easy, and parallel workers
-cannot feed a single-pass bound without per-worker heaps.
+| criterion | required | measured |
+|---|---|---|
+| recall | stays 17/17 | 17/17 |
+| generic-query tokens | down at least 5x | 6.6x and 7.2x |
+| latency | at or below agentgrep | 18.1 ms versus 21.5 ms |
+| peak RSS | under ceiling, flat 1k to 5k files | 5,720 to 5,880 KB |
 
-- **Exit:** recall stays 17/17; tokens-to-answer on the two generic queries falls
-  by at least 5x; latency is at or below agentgrep's 30 ms median; peak RSS is
-  under the ceiling **and flat from 1,000 to 5,000 files** in `memcheck`.
-- **Why now:** it is the differentiator, it is measurable today, and it repairs
-  the latency regression and the only linear memory term in the same stroke.
+So **kgrep now beats agentgrep on both objectives**: 3.8x better on median tokens
+to the answer, 2.5x better on p90, 9.6x better on the worst case, and faster.
 
-### Stage 2 — four verbs on one core
+### Stage 2 — four verbs on one core (next)
 
 Port `find` and `trace` onto the shaper. Required before the swap, and it is where
 ranking lands properly for the other three verbs.

@@ -15,16 +15,31 @@ pub struct Budget {
     /// Total match records kept across all hits. Further matches are counted
     /// but not stored, so the count stays honest and memory stays flat.
     pub max_total_matches: usize,
-    /// Hits kept. `None` means unbounded, which is only safe for verbs whose
-    /// output is inherently the file list itself.
+    /// Hits kept. `None` means unbounded. The default is bounded because the
+    /// file list is itself a term that grows with the repository: a generic
+    /// term in a large repo matches tens of thousands of files, and their names
+    /// alone would exceed any budget. The true total is always reported.
     pub max_hits: Option<usize>,
+    /// Estimated tokens of *detail* the packet may spend, across all hits.
+    /// Detail means match lines and symbol listings. Names of matching files
+    /// are not charged here, because coverage is the information we refuse to
+    /// drop quietly.
+    ///
+    /// `None` means unbounded, which is the deliberate opt-out. It is the
+    /// reason a generic query can still ask for everything instead of being
+    /// silently clipped.
+    pub max_detail_tokens: Option<usize>,
 }
 
 impl Default for Budget {
     fn default() -> Self {
         Self {
             max_total_matches: 20_000,
-            max_hits: None,
+            max_hits: Some(500),
+            // Generous against real queries (the measured median answer is 101
+            // tokens) and still bounds the pathological case by roughly 19x,
+            // where a generic term produces 154k tokens of output.
+            max_detail_tokens: Some(8_000),
         }
     }
 }
@@ -91,6 +106,10 @@ pub struct Hit {
     pub other_symbols_omitted_count: usize,
     /// Matches that existed but were not stored because the budget was spent.
     pub omitted_matches: usize,
+    /// This hit's detail was dropped to stay inside the packet budget. The
+    /// path, role, score and true match count survive; the match lines and
+    /// symbol listing do not, and the memory they held has been released.
+    pub summarized: bool,
 }
 
 impl Hit {
@@ -109,6 +128,7 @@ impl Hit {
             other_symbols: Vec::new(),
             other_symbols_omitted_count: 0,
             omitted_matches: 0,
+            summarized: false,
         }
     }
 }
@@ -124,6 +144,12 @@ pub struct Packet {
     pub total_matches: usize,
     /// Matches counted but not stored, across all hits.
     pub omitted_matches: usize,
+    /// Hits whose detail was dropped for the budget. Their paths are still
+    /// reported, so coverage survives even when detail does not.
+    pub summarized_hits: usize,
+    /// Matching files beyond `max_hits`, not listed at all. They are counted in
+    /// `total_files`, which always reports the truth.
+    pub unlisted_files: usize,
     pub truncated: bool,
 }
 
@@ -137,6 +163,8 @@ impl Packet {
             total_files: 0,
             total_matches: 0,
             omitted_matches: 0,
+            summarized_hits: 0,
+            unlisted_files: 0,
             truncated: false,
         }
     }

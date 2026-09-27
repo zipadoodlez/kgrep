@@ -24,6 +24,9 @@ fn grep_args(path: &Path, query: &str, regex: bool) -> GrepArgs {
         regex,
         json: false,
         paths_only: false,
+        max_tokens: None,
+        max_hits: None,
+        unbounded: false,
     }
 }
 
@@ -118,7 +121,7 @@ fn the_budget_bounds_stored_matches_but_not_the_count() {
 
     let budget = Budget {
         max_total_matches: 10,
-        max_hits: None,
+        ..Budget::default()
     };
     let packet =
         lexical::run_grep(root, &grep_args(root, "needle", false), budget).expect("grep runs");
@@ -176,6 +179,91 @@ fn outline_lists_symbols_for_a_known_file() {
     assert!(labels.contains(&"first"), "got {labels:?}");
     assert!(labels.contains(&"Colour"), "got {labels:?}");
     assert_eq!(result.language, "rust");
+}
+
+#[test]
+fn the_detail_budget_summarizes_but_keeps_the_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    // Two files with matches, so the second one has to give up its detail.
+    write(root, "a.rs", "fn needle_a() {}\n");
+    let body = (0..40).map(|i| format!("needle {i}\n")).collect::<String>();
+    write(root, "b.txt", &body);
+
+    let budget = Budget {
+        max_detail_tokens: Some(1),
+        ..Budget::default()
+    };
+    let packet =
+        lexical::run_grep(root, &grep_args(root, "needle", false), budget).expect("grep runs");
+
+    // The count is the truth regardless of what detail survived.
+    assert_eq!(packet.total_matches, 41);
+    assert_eq!(packet.total_files, 2);
+    assert!(
+        packet.summarized_hits >= 1,
+        "the tail should lose its detail, got {}",
+        packet.summarized_hits
+    );
+    assert!(packet.truncated);
+    let summarized = packet.hits.iter().find(|hit| hit.summarized);
+    assert!(summarized.is_some(), "one hit should be summarized");
+    let summarized = summarized.unwrap();
+    assert!(
+        !summarized.path.is_empty(),
+        "a summarized hit still names its file"
+    );
+    assert!(
+        summarized.matches.is_empty(),
+        "and releases the memory its detail held"
+    );
+    assert!(
+        summarized.omitted_matches > 0,
+        "while still reporting how much detail there was"
+    );
+}
+
+#[test]
+fn the_hit_cap_bounds_coverage_and_reports_the_truth() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for name in ["a.rs", "b.rs", "c.rs"] {
+        write(root, name, "pub fn needle() {}\n");
+    }
+
+    let budget = Budget {
+        max_hits: Some(2),
+        ..Budget::default()
+    };
+    let packet =
+        lexical::run_grep(root, &grep_args(root, "needle", false), budget).expect("grep runs");
+
+    assert_eq!(packet.hits.len(), 2, "only two files are listed");
+    assert_eq!(packet.total_files, 3, "but the total stays honest");
+    assert_eq!(packet.unlisted_files, 1);
+    assert!(packet.truncated);
+}
+
+#[test]
+fn an_unbounded_budget_reports_everything() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for name in ["a.rs", "b.rs", "c.rs"] {
+        write(root, name, "pub fn needle() {}\n");
+    }
+
+    let budget = Budget {
+        max_hits: None,
+        max_detail_tokens: None,
+        ..Budget::default()
+    };
+    let packet =
+        lexical::run_grep(root, &grep_args(root, "needle", false), budget).expect("grep runs");
+
+    assert_eq!(packet.hits.len(), 3);
+    assert_eq!(packet.unlisted_files, 0);
+    assert_eq!(packet.summarized_hits, 0);
+    assert!(!packet.truncated);
 }
 
 #[test]

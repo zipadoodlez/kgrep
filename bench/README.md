@@ -123,23 +123,69 @@ reproduced agentgrep's output to within a token per task.
 **Now, with ranked output and a streamed parallel walk.** This is the current
 standing, and it is better than agentgrep on both objectives:
 
-| tool | recall | median tok→ans | p90 | median latency | p95 |
-|---|---|---|---|---|---|
-| agentgrep 0.1.6 | 17/17 | 383.2 | 1,762.5 | 19.4 ms | 32.2 ms |
-| kgrep | 17/17 | **100.8** | **703.8** | **19.1 ms** | **30.0 ms** |
+| tool | recall | median tok→ans | p90 | max out tok | median latency | p95 |
+|---|---|---|---|---|---|---|
+| agentgrep 0.1.6 | 17/17 | 383.2 | 1,762.5 | 154,351 | 21.5 ms | 34.5 ms |
+| kgrep | 17/17 | **100.8** | **703.8** | **16,061** | **18.1 ms** | **28.8 ms** |
 
-So: **3.8x better on median tokens to the answer, 2.5x better on p90, and now
-slightly faster too.** The latency regression is gone. Before the streaming
-parallel walk kgrep was 50.3 ms against agentgrep's 19.4 ms; the walker closed it
-and then some.
+So kgrep is **3.8x better on median tokens to the answer, 2.5x better on p90,
+9.6x better on the worst case, and faster too**. Stage 1's exit criteria are all
+met; see below.
 
 Latency is per call, including process start-up, which a harness calling
 in-process does not pay. So these overstate what kcode sees and are best read as
 an upper bound and as a relative comparison between the two tools.
 
-The maximum output column is gone from this table because it is unchanged: 154k
-tokens for a generic query in both tools. Bounding it is the remaining half of
-Stage 1c and the only objective not yet met.
+## Stage 1c-ii: the packet bound
+
+The bound is two things, because there were two unbounded terms.
+
+**Detail** is bounded by an estimated token budget, `--max-tokens`, spent in
+ranked order after ranking. A hit that cannot afford detail keeps its name, role,
+score and true match count, and **releases the memory its detail held**. The top
+hit always gets full detail even if it alone exceeds the budget, so a single
+dense file cannot leave the caller with nothing.
+
+**Coverage** is also capped, at `--max-hits`, because the file list is itself a
+term that grows with the repository: a generic term in a large repo matches tens
+of thousands of files and their names alone would blow any budget. This was the
+second unbounded term and it was easy to miss.
+
+Both caps report the truth rather than hiding it:
+
+```
+... 7338 more matches counted but not stored (budget reached)
+... 287 of 306 listed files have no detail; raise --max-tokens or narrow the query
+... 41 more matching files not listed; raise --max-hits or narrow the query
+```
+
+Effect on the two generic queries, which is what the bound was for:
+
+| task | agentgrep tok→ans | kgrep before | kgrep now |
+|---|---|---|---|
+| `grep swarm` | 93,943 | 93,943 | **14,295** |
+| `grep todo` | 6,628 | 6,628 | **922** |
+
+Worst-case output fell from 154,351 to 16,061 tokens, **9.6x**. Recall is
+unchanged at 17/17, and median tokens to the answer is unchanged at 100.8, so the
+bound costs nothing on ordinary queries.
+
+It also reduced peak memory on heavy queries, from 14,024 KB to 10,204 KB,
+because a summarized hit frees the detail it was holding rather than merely not
+printing it.
+
+## Stage 1 exit, all four met
+
+| criterion | required | measured |
+|---|---|---|
+| recall | stays 17/17 | 17/17 |
+| generic-query tokens | down at least 5x | 6.6x and 7.2x |
+| latency | at or below agentgrep | 18.1 ms versus 21.5 ms |
+| peak RSS | under ceiling, flat 1k→5k files | 5,720 → 5,880 KB, about 40 bytes per file |
+
+The ceiling was 32 MB for repositories up to 100,000 files. At 40 bytes per file
+that projects to roughly 4 MB of file-count growth at 100,000 files, leaving the
+rest of the ceiling for an index.
 
 ## The latency finding, and it is my regression
 

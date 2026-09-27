@@ -44,6 +44,19 @@ pub fn render_grep_text(packet: &Packet, args: &GrepArgs) -> String {
             packet.omitted_matches
         ));
     }
+    if packet.summarized_hits > 0 {
+        lines.push(format!(
+            "... {} of {} listed files have no detail; raise --max-tokens or narrow the query",
+            packet.summarized_hits,
+            packet.hits.len()
+        ));
+    }
+    if packet.unlisted_files > 0 {
+        lines.push(format!(
+            "... {} more matching files not listed; raise --max-hits or narrow the query",
+            packet.unlisted_files
+        ));
+    }
 
     lines.join("\n")
 }
@@ -51,6 +64,17 @@ pub fn render_grep_text(packet: &Packet, args: &GrepArgs) -> String {
 fn render_grep_hit(hit: &Hit, args: &GrepArgs, lines: &mut Vec<String>) {
     lines.push(String::new());
     lines.push(hit.path.clone());
+
+    // Detail dropped for the budget: the name, role and true count survive,
+    // which is the cheapest and most useful part of the answer.
+    if hit.summarized {
+        lines.push(format!(
+            "  {} match(es) in this file; detail omitted (packet budget)",
+            hit.omitted_matches
+        ));
+        return;
+    }
+
     if hit.total_symbols > 0 {
         lines.push(format!(
             "  symbols: {} total, {} matched, {} other",
@@ -189,6 +213,8 @@ struct PacketJson<'a> {
     /// Matches counted but not stored, when a budget was reached. Absent from
     /// agentgrep's shape; additive and always present here.
     omitted_matches: usize,
+    summarized_hits: usize,
+    unlisted_files: usize,
     truncated: bool,
 }
 
@@ -207,6 +233,8 @@ struct HitJson<'a> {
     matched_symbol_count: usize,
     other_symbols: &'a [crate::outline::StructureItem],
     other_symbols_omitted_count: usize,
+    /// True when this hit's match detail was dropped for the packet budget.
+    summarized: bool,
 }
 
 #[derive(Serialize)]
@@ -249,6 +277,7 @@ pub fn grep_json(packet: &Packet) -> serde_json::Value {
             matched_symbol_count: hit.matched_symbol_count,
             other_symbols: &hit.other_symbols,
             other_symbols_omitted_count: hit.other_symbols_omitted_count,
+            summarized: hit.summarized,
         })
         .collect();
 
@@ -260,6 +289,8 @@ pub fn grep_json(packet: &Packet) -> serde_json::Value {
         total_files: packet.total_files,
         total_matches: packet.total_matches,
         omitted_matches: packet.omitted_matches,
+        summarized_hits: packet.summarized_hits,
+        unlisted_files: packet.unlisted_files,
         truncated: packet.truncated,
     })
     .expect("packet JSON is always serializable")

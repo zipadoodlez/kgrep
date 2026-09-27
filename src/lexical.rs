@@ -135,7 +135,84 @@ pub fn run_grep(root: &Path, args: &GrepArgs, budget: Budget) -> Result<Packet, 
     packet.omitted_matches = omitted_matches;
     packet.truncated = truncated;
     packet.hits = hits;
+
+    // Cap the list itself, because coverage is also a term that grows with the
+    // repository: a generic term in a large repo matches tens of thousands of
+    // files, and their names alone would blow any budget. The true total is
+    // kept and reported, so nothing is lost silently.
+    if let Some(max) = budget.max_hits
+        && packet.hits.len() > max
+    {
+        packet.unlisted_files = packet.hits.len() - max;
+        packet.hits.truncate(max);
+        packet.truncated = true;
+    }
+
+    // Spend the detail budget last, in ranked order, once we know what the best
+    // answer is. Among the files we do list, every one keeps its name. Only
+    // detail is dropped, which is the cheapest thing to drop and the most
+    // expensive thing to keep.
+    let (summarized_hits, freed_matches) = apply_detail_budget(&mut packet.hits, budget);
+    packet.summarized_hits = summarized_hits;
+    packet.omitted_matches += freed_matches;
+    if summarized_hits > 0 {
+        packet.truncated = true;
+    }
     Ok(packet)
+}
+
+/// Rough token estimate. Four characters per token is crude and consistent,
+/// which is all a budget needs.
+fn estimate_tokens(chars: usize) -> usize {
+    chars.div_ceil(4)
+}
+
+/// What a hit's detail costs: match lines, group headers, symbol listings.
+fn hit_detail_cost(hit: &Hit) -> usize {
+    let matches: usize = hit.matches.iter().map(|line| line.line_text.len() + 18).sum();
+    let groups = hit.groups.len() * 26;
+    let symbols: usize = hit.other_symbols.iter().map(|item| item.label.len() + 26).sum();
+    estimate_tokens(matches + groups + symbols)
+}
+
+/// Spend the detail budget in ranked order and return `(summarized hits, matches
+/// released)`. A hit that cannot afford detail keeps its name, role, score and
+/// true match count, and releases the memory its detail held.
+///
+/// The top hit is always shown in full even if it alone exceeds the budget, so a
+/// single dense file cannot leave the caller with nothing.
+fn apply_detail_budget(hits: &mut [Hit], budget: Budget) -> (usize, usize) {
+    let Some(limit) = budget.max_detail_tokens else {
+        return (0, 0);
+    };
+
+    let mut spent = 0usize;
+    let mut summarized = 0usize;
+    let mut freed = 0usize;
+
+    for hit in hits.iter_mut() {
+        let cost = hit_detail_cost(hit);
+        if spent == 0 && summarized == 0 {
+            spent += cost;
+            continue;
+        }
+        if spent.saturating_add(cost) <= limit {
+            spent += cost;
+            continue;
+        }
+        freed += hit.matches.len();
+        // Keep the true count on the hit before releasing the detail, so the
+        // rendered summary is about this file and not about zero.
+        hit.omitted_matches += hit.matches.len();
+        hit.matches.clear();
+        hit.groups.clear();
+        hit.other_symbols.clear();
+        hit.other_symbols_omitted_count = 0;
+        hit.summarized = true;
+        summarized += 1;
+    }
+
+    (summarized, freed)
 }
 
 /// Walk a file once for matches, then once more only if a structure sketch is
@@ -212,6 +289,7 @@ fn scan_file(
         other_symbols: grouping.other_symbols,
         other_symbols_omitted_count: grouping.other_symbols_omitted_count,
         omitted_matches: 0,
+        summarized: false,
     };
     Some((stored.len(), total, hit))
 }

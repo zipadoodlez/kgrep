@@ -17,7 +17,23 @@ fn main() {
     let exit = match &cli.command {
         Command::Grep(args) => {
             let root = resolve_root(&args.scope.path);
-            match lexical::run_grep(&root, args, Budget::default()) {
+            let budget = Budget {
+                max_hits: if args.unbounded {
+                    None
+                } else {
+                    args.max_hits.or(Budget::default().max_hits)
+                },
+                max_detail_tokens: if args.unbounded {
+                    None
+                } else {
+                    Some(
+                        args.max_tokens
+                            .unwrap_or(Budget::default().max_detail_tokens.unwrap_or(8_000)),
+                    )
+                },
+                ..Budget::default()
+            };
+            match lexical::run_grep(&root, args, budget) {
                 Ok(packet) => {
                     if args.json {
                         println!(
