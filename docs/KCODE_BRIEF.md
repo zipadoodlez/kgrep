@@ -5,9 +5,10 @@ context, so this is self-contained. Read the whole thing before touching code:
 the ordering at the end matters more than any individual edit.
 
 **Status of this brief.** The facts about kcode are verified with file and line
-references. The kgrep interface in "The contract" is **proposed and not built
-yet**. Nothing in kcode should be rewritten against it until the kgrep side says
-the shape is frozen.
+references. The kgrep interface in "The contract" is **built and frozen** as of
+commit `f0b747f`, so it is safe to build against. Additive changes only from
+here. Anything that would rename or reshape it is a conversation first, not a
+commit.
 
 ## What is being done, in one paragraph
 
@@ -51,61 +52,88 @@ Five things about the current seam that shaped this design:
 
 ## The contract
 
-kgrep's current API is `run_grep(root, &GrepArgs, Budget)` and three more like
-it, where the args types are clap structs. That is why this tool has four
-`build_*_args` functions: it is reverse-engineering a CLI to call a library.
-kgrep is being re-shaped so the seam is a type, not a CLI.
-
-This is what it will look like. **Proposed; confirm with the kgrep side before
-depending on names.**
+kgrep's entry points used to take clap structs, which is why this tool has four
+`build_*_args` functions: it was reverse-engineering a command line to call a
+library. They now take one `Query`, and the CLI is a thin adapter over it. These
+signatures are frozen.
 
 ```rust
-use kgrep::model::{Query, Budget, Packet};
+use kgrep::model::{Budget, FullRegionMode, Query, RenderOptions, StructuralQuery, Verb, Where};
 
-// The one input. Verbs are constructors, not four entry points.
-let query: Query = /* see the mapping below */;
+// The one input: the shared narrowing, plus exactly one verb.
+let query = Query {
+    where_: Where { root, glob, file_type, hidden, no_ignore, follow },
+    paths_only: false,
+    verb: Verb::Lexical { text: "foo".into(), regex: false },
+};
 
-// The one call. Synchronous and blocking, as today.
-let packet: Packet = kgrep::run(root, &query, Budget::default())?;
+// The one call per verb, all taking the same input shape.
+let packet = kgrep::lexical::run_grep(&query, Budget::default())?;  // -> Packet
+let packet = kgrep::find::run_find(&query, Budget::default())?;     // -> Packet
+let packet = kgrep::trace::run_trace(&query, Budget::default())?;   // -> Packet
+let result = kgrep::outline::run_outline(&query)?;                  // -> OutlineResult
 
-// Rendering is on the packet, not four free functions.
-let text: String = packet.text();
-let json: serde_json::Value = packet.json();
+// Rendering reads the answer, not the flags.
+let text = kgrep::packet::render_grep_text(&packet);                       // grep needs no options
+let text = kgrep::packet::render_find_text(&packet, &render_options);
+let text = kgrep::packet::render_trace_text(&packet, &render_options);
+let text = kgrep::packet::render_outline_text(&result);
 ```
 
-The mapping from the tool's params to a `Query` stays **local to kcode**. The
-shared thing is the type, not the mapping, because the CLI adapter has its own
-mapping and the two input shapes genuinely differ.
+The four verbs are not folded into one entry point, and that is deliberate:
+three return `Packet` and `outline` returns `OutlineResult`, because the two
+output shapes genuinely differ. One entry would have meant one renderer that
+branches four ways. Dispatch on the mode, as this tool already does.
+
+### Why four functions rather than one
+
+The verb is the only thing that differs, and the outputs are not interchangeable.
+If that changes, it changes by adding an entry point, not by reshaping the input.
+
+### The mapping from tool params stays in kcode
+
+The shared thing is the type, not the mapping. The CLI has its own adapter
+(`cli.rs`, `to_query` per verb) and this tool's params are a different shape, so
+the mapping belongs here:
 
 ```rust
-// Replaces build_grep_args / build_find_args / build_outline_args / build_smart_args_and_query.
-fn query_from_params(params: &AgentGrepInput) -> Result<Query, String> {
-    match params.mode.as_str() {
-        "grep"    => Ok(Query::grep(/* query, regex, scope, .. */)),
-        "find"    => Ok(Query::find(/* .. */)),
-        "outline" => Ok(Query::outline(/* file, .. */)),
-        "trace" | "smart" => Ok(Query::trace(/* terms, .. */)),
-        other => Err(format!("unknown mode: {other}")),
-    }
+fn query_from_params(params: &AgentGrepInput, root: PathBuf) -> Result<Query, String> {
+    let where_ = Where { root, glob: params.glob.clone(), file_type: params.r#type.clone(),
+                         hidden: false, no_ignore: false, follow: false };
+    let paths_only = params.paths_only.unwrap_or(false);
+    let verb = match params.mode.as_str() {
+        "grep"    => Verb::Lexical { text: params.query.clone().unwrap_or_default(),
+                                     regex: params.regex.unwrap_or(false) },
+        "find"    => Verb::Path { terms: params.query.clone().into_iter().collect(),
+                                  max_files: params.max_files.unwrap_or(10) },
+        "outline" => Verb::Outline { file: params.file.clone().unwrap_or_default(),
+                                     max_items: None },
+        // The mode the model says is `smart`; kgrep calls it `trace`.
+        "trace" | "smart" => Verb::Structural {
+            query: kgrep::trace::parse_query(&params.terms.clone().unwrap_or_default())?,
+            max_files: params.max_files.unwrap_or(5),
+            max_regions: params.max_regions.unwrap_or(6),
+            full_region: FullRegionMode::Auto,
+        },
+        other => return Err(format!("unknown mode: {other}")),
+    };
+    Ok(Query { where_, paths_only, verb })
 }
 ```
 
-Note the mode `smart` is kgrep's `trace`. Keep accepting `smart` from the model;
-it must not become a new failure mode.
+Two things about it:
 
-### Two decisions still open on the kgrep side
+- **`paths_only` is not a print flag.** It is part of the question, and the
+  packet records it, so a renderer honours it without being told twice.
+- **`Verb::Outline` keeps its own `file`** rather than folding it into `Where`,
+  because an outline resolves that name *within* the root, so the two are
+different things.
 
-Both affect you, so do not assume an answer:
+### The two decisions, now closed
 
-- **`outline` may or may not unify into `Packet`.** Today it returns a separate
-  `OutlineResult`, which is why there would otherwise be two render functions. If
-  it unifies, there is one renderer for all four modes. Confirm before writing
-  the render call.
-- **`intent` may or may not become a `Query` field.** It is currently required
-  from the model and only used for display. It is wanted later as a ranking
-  signal, because a definition query and a topic query want opposite rankings and
-  one weight table cannot serve both. If it lands, you pass it through; if not,
-  you keep dropping it.
+- **`outline` keeps its own output type.** It was not folded into `Packet`.
+- **`intent` is not a `Query` field.** It is still dropped at the seam, and can
+  be added later as an optional field without breaking anything.
 
 ## What to change, and what it replaces
 
@@ -116,8 +144,8 @@ names and behaviour do not change.
 | in kcode | becomes |
 |---|---|
 | `build_grep_args`, `build_find_args`, `build_outline_args`, `build_smart_args_and_query` | one `query_from_params` |
-| `run_grep` / `run_find` / `run_outline` / `run_smart` | one `kgrep::run(root, &query, budget)` |
-| `render_grep_output` / `render_find_output` / `render_outline_output` / `render_smart_output` | one render on the packet |
+| `run_grep` / `run_find` / `run_outline` / `run_smart` | the same four names, each taking `&Query` |
+| `render_grep_output` / `render_find_output` / `render_outline_output` / `render_smart_output` | the render functions above, taking `&RenderOptions` where they need it |
 
 Keep `execute_linked_agentgrep`'s structure: the mode dispatch stays (it builds a
 different `Query` per mode), and so do the `filter_*_to_exact_file` helpers, which
@@ -190,9 +218,8 @@ they should keep passing **without being rewritten**, apart from the wiring.
 
 1. Read `agentgrep.rs` end to end. Understand the four modes and the five
    behaviours above before changing anything.
-2. Wait for the kgrep shape to be frozen. Until then the only safe work is
-   understanding the seam and confirming the interface names.
-3. Refactor the seam in kcode against the frozen shape.
+2. The kgrep shape is frozen. Build the mapping against it.
+3. Refactor the seam in kcode.
 4. Run the tool's tests and the parity script.
 5. Report back: what you changed, what broke, what the tests said, and anything in
    the interface that was wrong in practice. The last one is the most useful.
@@ -201,8 +228,8 @@ they should keep passing **without being rewritten**, apart from the wiring.
 
 - Whether the `Query` mapping was as clean as it looks, or whether a tool param
   has no honest home in it.
-- Whether the four render functions collapsed into one without losing output, or
-  whether `outline` genuinely needs its own.
+- Whether the four render calls were enough, or whether one of them wanted
+  something `RenderOptions` does not carry.
 - What the 5 s budget did in practice. Did anything new get promoted to the
   background?
 - Anything the brief got wrong. It was written from reading the tree, and reading
