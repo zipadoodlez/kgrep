@@ -572,17 +572,15 @@ resolution. The grep relevance constants, which are borrowed rather than tuned.
 
 ## Attribution
 
-The upstream is not ours. agentgrep is MIT (`1jehuang`). Absorbing its source
-makes kgrep a derivative work of it, so its notice is owed.
+`kgrep` is MIT. `LICENSE` carries the text and two copyright lines: Jeremy
+Huang's, because this is a derivative of his agentgrep, and Khaled Jaafar's, for
+the modifications. Same licence as kcode, same holder for the absorbed work.
 
-**Landed**, in `NOTICE` at the repo root. One wrinkle worth knowing: agentgrep
-ships no `LICENSE` file, no `authors` field, and no copyright line in any source
-file. Its licence is stated only by `license = "MIT"` in `Cargo.toml`, so the text
-is reproduced from the standard template and the holder is identified by the
-account that owns the repository. If upstream ever publishes a copyright line, it
-should replace ours.
+`NOTICE` records what was absorbed, from which revision, and why his line is
+derived rather than copied: upstream ships no `LICENSE` file, no `authors` field,
+and no copyright line anywhere, so its licence is stated only by `license = "MIT"`
+in its `Cargo.toml`. If upstream ever publishes a different line, it should
+replace ours.
 
-Still open, and separate: `kgrep`'s own `Cargo.toml` declares
-`license = "Apache-2.0"` but the repository ships no `LICENSE` file either, so the
-crate is not yet properly licensed on its own account. That is a choice to make
-before release, not a blocker for the swap.
+The licence text lives in `LICENSE` alone. `NOTICE` does not repeat it, because a
+second copy is a second thing to keep in step.

@@ -3,7 +3,6 @@ name = "kgrep"
 version = "0.1.0"
 edition = "2024"
 description = "Code search and retrieval for agents: lexical and structural"
-license = "Apache-2.0"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
