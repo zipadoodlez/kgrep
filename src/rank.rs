@@ -65,7 +65,8 @@ impl Ranking {
     }
 }
 
-/// Weights, one home for the whole table.
+/// Weights, one home for the whole table. Shared by every verb, so `grep` and
+/// `find` cannot drift apart the way agentgrep's two role tables did.
 mod weight {
     pub const PATH_FULL: i32 = 120;
     pub const PATH_TOKEN: i32 = 25;
@@ -80,6 +81,9 @@ mod weight {
     pub const ROLE_CODE_BOOST: i32 = 20;
     pub const ROLE_DOCS_PENALTY: i32 = -25;
     pub const ROLE_TEST_PENALTY: i32 = -15;
+    /// `find` only: a query token appearing anywhere in the body. Cheap
+    /// confirmation that a file whose path matched is really about the topic.
+    pub const TEXT_TOKEN: i32 = 4;
 }
 
 /// Split a query into comparable lowercase tokens, the same rule the scan uses
@@ -177,5 +181,100 @@ pub fn score(hit: &Hit, query: &str, tokens: &[String], ranking: Ranking) -> (i3
         }
     }
 
+    (score, why)
+}
+
+/// Score a file for discovery, where the question is "which files are about
+/// this topic" rather than "where does this text appear".
+///
+/// Path evidence is a gate rather than a signal: a file whose path says nothing
+/// about the query is not a discovery candidate, however much its body mentions
+/// it. That mirrors agentgrep's `has_path_evidence`, and it is what keeps `find`
+/// from degenerating into `grep`.
+///
+/// Returns `(0, vec![])` when the file should not be reported.
+pub fn score_discovery(
+    relative_path: &str,
+    role: &str,
+    labels: &[String],
+    text: &str,
+    query: &str,
+    tokens: &[String],
+) -> (i32, Vec<String>) {
+    let mut score = 0;
+    let mut why = Vec::new();
+    let query_lower = query.to_ascii_lowercase();
+    let path_lower = relative_path.to_ascii_lowercase();
+
+    if query_lower.is_empty() {
+        return (0, why);
+    }
+
+    let mut evidence = 0usize;
+    if path_lower.contains(&query_lower) {
+        score += weight::PATH_FULL;
+        why.push("path contains the whole query".to_string());
+        evidence += 1;
+    }
+    let path_tokens = tokens
+        .iter()
+        .filter(|token| path_lower.contains(token.as_str()))
+        .count();
+    if path_tokens > 0 {
+        score += (path_tokens as i32) * weight::PATH_TOKEN;
+        why.push(format!("path tokens matched: {path_tokens}"));
+        evidence += path_tokens;
+    }
+
+    // Everything below is confirmation, so it only counts once the path has
+    // already said this file is a candidate.
+    if evidence > 0 {
+        let symbol_hits = labels
+            .iter()
+            .filter(|label| {
+                let label = label.to_ascii_lowercase();
+                tokens.iter().any(|token| label.contains(token.as_str()))
+            })
+            .count();
+        if symbol_hits > 0 {
+            let capped = symbol_hits.min(weight::SYMBOL_TOKEN_CAP);
+            score += (capped as i32) * weight::SYMBOL_TOKEN;
+            why.push(format!("symbol hits: {symbol_hits}"));
+        }
+
+        let text_lower = text.to_ascii_lowercase();
+        let text_hits = tokens
+            .iter()
+            .filter(|token| text_lower.contains(token.as_str()))
+            .count();
+        if text_hits > 0 {
+            score += (text_hits as i32) * weight::TEXT_TOKEN;
+            why.push(format!("supporting text hits: {text_hits}"));
+        }
+
+        if tokens.iter().any(|token| role.contains(token.as_str())) {
+            score += weight::ROLE_TOKEN;
+            why.push(format!("role matches: {role}"));
+        }
+        match role {
+            "implementation" | "auth" | "provider" | "ui" | "handler" => {
+                score += weight::ROLE_CODE_BOOST;
+                why.push(format!("code role: {role}"));
+            }
+            "docs" => {
+                score += weight::ROLE_DOCS_PENALTY;
+                why.push("docs penalty".to_string());
+            }
+            "test" => {
+                score += weight::ROLE_TEST_PENALTY;
+                why.push("test penalty".to_string());
+            }
+            _ => {}
+        }
+    }
+
+    if evidence == 0 {
+        return (0, Vec::new());
+    }
     (score, why)
 }

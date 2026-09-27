@@ -1,8 +1,8 @@
 //! The shaper end to end: choose files, match, group, packet.
 
-use kgrep::cli::{GrepArgs, OutlineArgs, ScopeArgs};
+use kgrep::cli::{FindArgs, GrepArgs, OutlineArgs, ScopeArgs};
 use kgrep::model::Budget;
-use kgrep::{lexical, outline};
+use kgrep::{find, lexical, outline};
 use std::fs;
 use std::path::Path;
 
@@ -264,6 +264,77 @@ fn an_unbounded_budget_reports_everything() {
     assert_eq!(packet.unlisted_files, 0);
     assert_eq!(packet.summarized_hits, 0);
     assert!(!packet.truncated);
+}
+
+#[test]
+fn find_ranks_by_path_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(root, "src/auth/session.rs", "pub fn load() {}\n");
+    write(root, "src/other.rs", "pub fn load() {}\n");
+
+    let args = FindArgs {
+        query_parts: vec!["auth".to_string(), "session".to_string()],
+        scope: scope(root),
+        max_files: 10,
+        json: false,
+        paths_only: false,
+        debug_score: false,
+    };
+    let packet = find::run_find(root, &args, Budget::default()).expect("find runs");
+
+    assert_eq!(packet.hits.len(), 1, "only the path that says auth/session");
+    assert_eq!(packet.hits[0].path, "src/auth/session.rs");
+    assert!(packet.hits[0].score > 0);
+    assert!(!packet.hits[0].why.is_empty(), "and it explains itself");
+}
+
+#[test]
+fn find_refuses_a_file_whose_path_says_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    // The body is full of the term, but the path says nothing about it. This is
+    // the difference between discovery and search.
+    write(root, "src/other.rs", "// auth session auth session\npub fn x() {}\n");
+
+    let args = FindArgs {
+        query_parts: vec!["auth".to_string(), "session".to_string()],
+        scope: scope(root),
+        max_files: 10,
+        json: false,
+        paths_only: false,
+        debug_score: false,
+    };
+    let packet = find::run_find(root, &args, Budget::default()).expect("find runs");
+
+    assert!(
+        packet.hits.is_empty(),
+        "path evidence gates the candidate, got {:?}",
+        packet.hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn find_reports_the_true_total_when_it_caps() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for name in ["a_auth.rs", "b_auth.rs", "c_auth.rs"] {
+        write(root, &format!("src/{name}"), "pub fn x() {}\n");
+    }
+
+    let args = FindArgs {
+        query_parts: vec!["auth".to_string()],
+        scope: scope(root),
+        max_files: 2,
+        json: false,
+        paths_only: false,
+        debug_score: false,
+    };
+    let packet = find::run_find(root, &args, Budget::default()).expect("find runs");
+
+    assert_eq!(packet.hits.len(), 2);
+    assert_eq!(packet.total_files, 3, "the total stays honest");
+    assert_eq!(packet.unlisted_files, 1);
 }
 
 #[test]

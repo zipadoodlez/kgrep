@@ -1,7 +1,7 @@
 use clap::Parser;
 use kgrep::cli::{Cli, Command};
 use kgrep::model::Budget;
-use kgrep::{lexical, outline, packet, peak};
+use kgrep::{find, lexical, outline, packet, peak};
 use std::path::PathBuf;
 
 fn resolve_root(path: &Option<String>) -> PathBuf {
@@ -73,9 +73,28 @@ fn main() {
                 }
             }
         }
-        Command::Find(_) => {
-            eprintln!("error: `find` is not implemented yet");
-            2
+        Command::Find(args) => {
+            let root = resolve_root(&args.scope.path);
+            // `find` caps by its own `--max-files`; the shared hit cap is a
+            // second, larger backstop and the smaller of the two wins.
+            match find::run_find(&root, args, Budget::default()) {
+                Ok(packet) => {
+                    if args.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&packet::find_json(&packet))
+                                .expect("serialize find json")
+                        );
+                    } else {
+                        println!("{}", packet::render_find_text(&packet, args));
+                    }
+                    0
+                }
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    2
+                }
+            }
         }
         Command::Trace(_) => {
             eprintln!("error: `trace` is not implemented yet");

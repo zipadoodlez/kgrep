@@ -4,6 +4,7 @@
 //! the reasoning; this crate is that design, not a plan for it.
 
 pub mod cli;
+pub mod find;
 pub mod lexical;
 pub mod model;
 pub mod outline;

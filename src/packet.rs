@@ -296,6 +296,115 @@ pub fn grep_json(packet: &Packet) -> serde_json::Value {
     .expect("packet JSON is always serializable")
 }
 
+// --- find ------------------------------------------------------------------
+
+pub fn render_find_text(packet: &Packet, args: &crate::cli::FindArgs) -> String {
+    if args.paths_only {
+        return packet
+            .hits
+            .iter()
+            .map(|hit| hit.path.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+
+    let mut lines = vec![
+        format!("query: {}", packet.query),
+        format!("files: {} shown", packet.hits.len()),
+    ];
+
+    for (idx, hit) in packet.hits.iter().enumerate() {
+        lines.push(String::new());
+        lines.push(format!("{}. {}", idx + 1, hit.path));
+        lines.push(format!("   role: {}  language: {}", hit.role, hit.language));
+        if args.debug_score {
+            lines.push(format!("   score: {}", hit.score));
+        }
+        lines.push("   why:".to_string());
+        for reason in &hit.why {
+            lines.push(format!("     - {reason}"));
+        }
+        lines.push("   structure:".to_string());
+        for item in &hit.other_symbols {
+            lines.push(format!(
+                "     - {} {} @ {}-{} ({} lines)",
+                item.kind, item.label, item.start_line, item.end_line, item.line_count
+            ));
+        }
+        if hit.other_symbols_omitted_count > 0 {
+            lines.push(format!(
+                "     ... {} more symbols",
+                hit.other_symbols_omitted_count
+            ));
+        }
+    }
+
+    if packet.unlisted_files > 0 {
+        lines.push(String::new());
+        lines.push(format!(
+            "... {} more matching files not listed; raise --max-files or narrow the query",
+            packet.unlisted_files
+        ));
+    }
+
+    lines.join("\n")
+}
+
+#[derive(Serialize)]
+struct FindJson<'a> {
+    query: &'a str,
+    root: &'a str,
+    files: Vec<FindFileJson<'a>>,
+    total_files: usize,
+    unlisted_files: usize,
+}
+
+#[derive(Serialize)]
+struct FindFileJson<'a> {
+    path: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path_bytes: Option<&'a str>,
+    role: &'a str,
+    language: &'a str,
+    score: i32,
+    why: &'a [String],
+    structure: FindStructureJson<'a>,
+}
+
+#[derive(Serialize)]
+struct FindStructureJson<'a> {
+    items: &'a [crate::outline::StructureItem],
+    omitted_count: usize,
+}
+
+pub fn find_json(packet: &Packet) -> serde_json::Value {
+    let files = packet
+        .hits
+        .iter()
+        .map(|hit| FindFileJson {
+            path: &hit.path,
+            path_bytes: hit.path_bytes.as_deref(),
+            role: &hit.role,
+            language: &hit.language,
+            score: hit.score,
+            why: &hit.why,
+            structure: FindStructureJson {
+                items: &hit.other_symbols,
+                omitted_count: hit.other_symbols_omitted_count,
+            },
+        })
+        .collect();
+
+    serde_json::to_value(FindJson {
+        query: &packet.query,
+        root: &packet.root,
+        files,
+        total_files: packet.total_files,
+        unlisted_files: packet.unlisted_files,
+    })
+    .expect("find JSON is always serializable")
+}
+
 // --- outline ---------------------------------------------------------------
 
 pub fn render_outline_text(result: &OutlineResult) -> String {
