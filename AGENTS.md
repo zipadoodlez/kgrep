@@ -1,7 +1,7 @@
 # graphgrep (working name)
 
-One shaper for how an agent finds its way around a codebase, built so that memory
-stays flat no matter how large the repository is.
+One shaper for how an agent finds its way around a codebase, built to spend
+tokens and latency well and to keep memory inside a declared ceiling.
 
 This file is the plan of record: what is settled, what we have measured, where the
 code actually is, and what comes next. `docs/` holds the longer reasoning.
@@ -35,29 +35,61 @@ be allowed in.
 
 The shaper is ours and is the product. The sources are interchangeable.
 
-## The constraint: memory
+## The objective, and the memory guardrail
 
-The differentiator, not a detail. Other harnesses and other indexes hold the
-codebase in RAM. We do not. Every decision is judged by capability per byte.
+**Maximise capability per unit of tokens and latency.** Those are the two costs
+the agent actually feels: tokens are money and context, latency is what makes a
+tool feel bad. CPU matters mostly *as* latency, plus heat and battery on a laptop.
 
-1. **Nothing resident.** Work is per file, released per file.
-2. **Peak memory may scale with the largest file, never with the repository.**
-   A hundred-file repo and a half-million-file repo must peak in the same place.
-3. **Any persistent artifact is mmapped, never deserialized.** Touch the lookup
-   table, read payloads by offset, let the OS page and evict.
-4. **Bounded results.** Ranked output keeps a bounded top-K. Nothing collects
+**Memory is a guardrail, not an objective.** It matters in classes, not in bytes:
+
+- **Forbidden:** anything that scales unboundedly with repository size, or that is
+  orders of magnitude larger than the harness itself. Language servers (hundreds
+  of megabytes to gigabytes) and embedding models are the real enemy, and they are
+  excluded.
+- **Allowed, and often the right trade:** memory capped by a declared number, or
+  memory-mapped so the OS can evict it, when it buys tokens or latency.
+
+An earlier draft of this file demanded flat memory. That was too tight: it refused
+cheap wins to protect a number nobody can perceive. The positioning is already won
+by being Rust and by not shipping a language server, which is an order of
+magnitude, not a factor of two. Spending a bounded amount of memory to cut tokens
+or latency is usually correct.
+
+**The guardrail is a number, not a vibe.** "We'll keep what we need" is how you
+end up with a vector store by accident. So: a declared ceiling, measured, where
+exceeding it is a failure rather than a discussion.
+
+Rules that still hold:
+
+1. **Work is per file and released per file**, unless held in a bounded cache.
+2. **Nothing scales unboundedly with the repository.** Bounded by a declared
+   number, or mmapped, or it does not ship.
+3. **Bounded results.** Ranked output keeps a bounded top-K. Nothing collects
    every match before sorting.
-5. **No language servers, no embedding models, in-process.** A language server is
-   hundreds of megabytes to gigabytes. LSP is consumed over MCP, only if the user
-   already runs one.
-6. **Every tool call has a budget.** Exceeding it truncates, spills, or defers.
-   It never grows unbounded.
+4. **No language servers, no embedding models, in-process.** LSP is consumed over
+   MCP, only if the user already runs one.
+5. **Every tool call has a budget.** Exceeding it truncates, spills, or defers. It
+   never grows unbounded.
 
-Rule 4 is the interesting one, because it resolves a tension: **you must score
-everything, but you do not need to keep everything.** Scoring is a streaming fold;
-keeping is what gets bounded. That is how ranking and flat memory coexist, and
-neither agentgrep nor `rg` does it today, `rg` because it never collects and
-agentgrep because it collects everything.
+Rule 3 resolves a tension worth naming: **you must score everything, but you do
+not need to keep everything.** Scoring is a streaming fold; keeping is what gets
+bounded. That is how ranking and a bounded footprint coexist, and neither
+agentgrep nor `rg` does it today, `rg` because it never collects and agentgrep
+because it collects everything.
+
+### Measured per change
+
+Three numbers, not one:
+
+| Number | Why it matters | How |
+|---|---|---|
+| tokens to answer | money and context, the primary currency | `scripts/bench.py` |
+| latency | what the agent and the user feel | same harness, timed |
+| peak RSS | the guardrail, against a declared ceiling | `scripts/memcheck.sh` |
+
+A change that improves tokens or latency while staying under the ceiling is a win.
+A change that exceeds the ceiling needs a reason, not a shrug.
 
 ## The product: the packet
 
@@ -187,7 +219,8 @@ are stated so a stage ends in evidence rather than opinion.
 - Needs the grep relevance score, which is open question number one. A first cut
   can reuse `find`'s signal set, which also unifies the two verbs' ranking.
 - **Exit:** recall does not regress on the bench, maximum output falls by an order
-  of magnitude on generic queries, and peak RSS stays flat in `memcheck`.
+  of magnitude on generic queries, and peak RSS stays under the declared ceiling
+  in `memcheck`.
 
 ### Stage 2 — four verbs on one core
 
@@ -303,8 +336,9 @@ scripts/memcheck.sh    # small by default; pass sizes to make it bigger
 
 ## Working rules for agents
 
-- **Memory is the product.** Any change that makes peak memory scale with repo
-  size is a regression, however fast or neat it is.
+- **Memory is a guardrail; tokens and latency are the product.** Nothing may
+  scale unboundedly with repo size. Spending a bounded amount to cut tokens or
+  latency is usually correct, and needs no apology.
 - **Measure before claiming.** The benchmark exists because a confident claim in
   this repository was already wrong once. If a number is stated, it came from a
   run, and the run's shape is described.
@@ -320,10 +354,11 @@ scripts/memcheck.sh    # small by default; pass sizes to make it bigger
 
 ## Decisions
 
-Settled: Rust, one crate. One shaper with pluggable sources. Flat memory as the
-binding constraint. No language servers or embedding models in-process. graphify
-contributes ideas, agentgrep contributes code. No dependency swap until done.
-Initial extraction languages: Rust, Python, TypeScript/JavaScript, Go.
+Settled: Rust, one crate. One shaper with pluggable sources. Tokens and latency
+as the objective, with a declared memory ceiling as the guardrail, rather than
+flatness for its own sake. No language servers or embedding models in-process.
+graphify contributes ideas, agentgrep contributes code. No dependency swap until
+done. Initial extraction languages: Rust, Python, TypeScript/JavaScript, Go.
 
 Open: the name. The grep relevance score. The default token budget. Whether the
 graph is ever worth building. Graph freshness. Whether scope includes rewriting.

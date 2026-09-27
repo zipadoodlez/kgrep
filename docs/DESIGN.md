@@ -10,10 +10,12 @@ is out of date.
 > the product. The sections below on how the halves synergize remain useful as the
 > long-term direction, but the build order at the bottom is the current plan.
 
-## The hard constraint: memory
+## The objective, and the memory guardrail
 
-See `AGENTS.md` for the rules. In one line: **capability may grow with repository
-size, memory may not.**
+See `AGENTS.md`. In one line: **optimise tokens and latency, keep memory inside a
+declared ceiling.** Memory is a guardrail, not an objective, and it matters in
+classes: unbounded or orders-of-magnitude growth is out, a capped or mmapped
+budget that buys tokens or latency is in.
 
 The consequence for everything below is that a source is only allowed in if it is
 streaming and bounded, and any persisted artifact is mmapped and queried by
