@@ -19,8 +19,10 @@ agentgrep answers it lexically and instantly; graphify answers it structurally
 and durably. graphgrep is the grain of each, in one crate.
 
 The end goal is to replace the `agentgrep` dependency inside **kcode** with
-graphgrep. Compatibility with that consumer is a hard constraint, not an
-aspiration.
+graphgrep, refactoring kcode's integration site wherever graphgrep's shape is
+the cleaner one. What is fixed is kcode's behaviour, not agentgrep's API. kcode
+keeps agentgrep until graphgrep is complete and tested; the swap is the last
+step, not the first.
 
 ### How the two halves arrive
 
@@ -110,10 +112,10 @@ Cut deliberately, region by region. Start from the core representation.
 Every "keep" is a capability contract. Every "cut" is a reversible decision: a
 cut feature can return as a small operation over the core if it proves itself.
 
-## Compatibility contract
+## Consumers and the kcode seam
 
-The one consumer that matters today is kcode. It depends on agentgrep as a
-library and calls:
+The consumer that matters is kcode. Today it depends on agentgrep as a library
+and calls:
 
 ```
 ::agentgrep::cli::{FindArgs, FullRegionMode, GrepArgs, OutlineArgs, SmartArgs}
@@ -126,19 +128,32 @@ library and calls:
                       render_outline_output, render_smart_output}
 ```
 
-`kcode/crates/jcode-app-core/src/tool/agentgrep.rs` (+ `args.rs`,
-`context.rs`) is the integration site and the de-facto acceptance test. Changing
-graphgrep is not done until that consumer builds and its tests pass against it.
+Its wrapper lives in `kcode/crates/jcode-app-core/src/tool/agentgrep.rs` (+
+`args.rs`, `context.rs`).
 
-The CLI surface (`grep`, `find`, `outline`, `trace`) is the same contract for
-humans and scripts. Keep it exact until a change is agreed on both sides.
+**kcode is in scope to refactor.** We do not preserve agentgrep's API shape for
+its own sake. If a cleaner graphgrep API makes kcode's integration site simpler
+too, change both. The refactor is real but bounded: the agentgrep integration
+site, not the rest of kcode.
 
-**Clean core, stable façade.** Inside, there is one shape: a `Query` in, a
-`Packet` out. The four `run_*` entry points are thin constructors over it, not
-parallel implementations. This keeps the core small (`grep`/`find`/`outline`/
-`trace` stop being four ways to do one thing) while the old names survive as a
-compatibility façade so kcode swaps by rename, not rewrite. When a fourth
-caller appears, it grows no fourth path.
+**No dependency swap until graphgrep is done and tested.** kcode keeps its
+agentgrep dependency throughout. Repointing it at graphgrep is the last step,
+after graphgrep is complete and its tests pass.
+
+### Clean core, thin CLI
+
+Inside graphgrep there is one shape: a `Query` in, a `Packet` out. `grep`,
+`find`, `outline`, and `trace` are thin constructors over that core, not four
+parallel implementations. The CLI keeps those four verbs for humans and
+scripts; kcode calls the core API directly. One way in, one way out, however
+many front doors.
+
+### Parity while kcode is untouched
+
+Because the swap is deferred, parity with agentgrep is proven independently:
+graphgrep's own tests, plus a differential check that runs agentgrep and
+graphgrep over the same corpus and compares output. Absorbing code without a
+real oracle is how silent regressions land.
 
 ## Layout
 
@@ -188,16 +203,22 @@ source of truth for intent.
   memory. Keep docs (including this file) in sync, not aspirational.
 - **Commit as you go.** Small, whole, working commits.
 
-## Open decisions
+## Decisions
 
-1. **Language.** Rust is the recommendation. Both halves of the interesting
-   problem (tree-sitter, file walking, graph algorithms) are natural in Rust,
-   and the target consumer is already a Rust library. The cost is not the
-   language, it is the surface area — so the scope above is fixed *before* the
-   port, not during it. The Python side is a source to read, not a runtime to
-   keep.
-2. **Drop-in vs. new API.** Keep the agentgrep-compatible surface as the
-   stable floor, then grow graph verbs beside it. Preferred over a hard fork of
-   the API.
-3. **Graph freshness.** How stale is too stale. Decide when the first graph
-   backend lands.
+Settled:
+
+1. **Language: Rust.** One crate, one binary. The Python side is a source to
+   read, not a runtime to keep.
+2. **API: clean core, refactor kcode.** One `Query`/`Packet` core. The four CLI
+   verbs are thin constructors over it, and kcode's integration site is
+   refactored onto the same core when graphgrep is ready.
+3. **No dependency swap until done.** kcode keeps agentgrep until graphgrep is
+   complete and tested. Parity is proven by tests plus a differential run
+   against agentgrep.
+4. **Extraction languages, initial set:** Rust, Python, TypeScript/JavaScript,
+   Go. More on demand, never for parity's sake.
+
+Open:
+
+5. **Graph freshness.** How stale is too stale to prefer the graph backend over
+   lexical. Decide when the graph backend lands.
