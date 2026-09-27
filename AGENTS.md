@@ -217,10 +217,11 @@ reasons are stated so a later reader can disagree with them on the merits.
 Three things, in this order, because the first informs the second and the second
 must not be built twice.
 
-**1a. Declare the numbers.** We have never measured peak RSS on a real repo, so
-"under the ceiling" currently means nothing. Run `scripts/memcheck.sh` against
-kcode, record the baseline, and pick a ceiling, for example baseline plus a
-stated index allowance. Cheap, and it makes every later claim checkable.
+**1a. Declare the numbers.** Done, see `bench/README.md`. kcode costs 5.5 MB with
+a light query and 12.6 MB with a heavy one; process baseline is about 4.8 MB. But
+memory is **not flat**: the file walk materializes the whole file list at roughly
+**268 bytes per file**, which is the one term that scales with the repository.
+Provisional ceiling: **32 MB peak for any repository up to 100,000 files**.
 
 **1b. Decide the ranking signal.** This is the one genuinely open design
 question and it blocks the rest. "Rank before spending" is meaningless without a
@@ -230,18 +231,27 @@ as a proxy for specificity; file role) and measure whether tokens-to-answer
 improves on the 17 tasks. A null result is a real outcome and changes the design,
 for example bounding by file count instead of rank.
 
-**1c. Build the bounded packet and the parallel scan together.** Token-denominated
-budget; rank, then spend; cut detail before coverage; keep true totals; an
-explicit unbounded opt-out. Parallel workers over the file list, each holding a
-bounded top-K, merged at the end. These two are one change, not two: parallel
-workers cannot feed a single-pass bound without per-worker heaps, so doing the
-bound first means doing it again.
+**1c. Stream the walk, in parallel, with a bounded packet.** Three fixes that are
+one change, which is why they are grouped:
+
+- **Stream the walk.** `ignore`'s parallel walker yields entries instead of
+  collecting them, removing the 268-bytes-per-file term. This is the only known
+  growth in the tool that scales with repository size.
+- **Parallelize.** `build_parallel` also supplies the threading whose absence is
+  the measured 2.2x latency regression.
+- **Bound the packet.** Token-denominated budget; rank, then spend; cut detail
+  before coverage; keep true totals; an explicit unbounded opt-out. Parallel
+  workers each hold a bounded top-K, merged at the end.
+
+Streaming, parallelism, and bounding cannot be done separately without doing one
+of them twice: a collected list is what makes chunking easy, and parallel workers
+cannot feed a single-pass bound without per-worker heaps.
 
 - **Exit:** recall stays 17/17; tokens-to-answer on the two generic queries falls
   by at least 5x; latency is at or below agentgrep's 30 ms median; peak RSS is
-  under the declared ceiling.
+  under the ceiling **and flat from 1,000 to 5,000 files** in `memcheck`.
 - **Why now:** it is the differentiator, it is measurable today, and it repairs
-  the latency regression in the same stroke.
+  the latency regression and the only linear memory term in the same stroke.
 
 ### Stage 2 — four verbs on one core
 

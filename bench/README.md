@@ -35,6 +35,66 @@ To build the agentgrep oracle, use the version kcode actually pins (`v0.1.6`,
 `~/.cargo/git/checkouts/`. Build a copy of it; do not clone `main`, which is a
 later release and would lock in the wrong behaviour.
 
+## Memory baseline, 2026-09-27
+
+Measured with `scripts/memcheck.sh`, reading the tool's own `/proc/self/status`
+high-water mark.
+
+**Method warning.** An earlier attempt measured with an external wrapper and
+reported a flat 13.7 MB for every query and both binaries. That was the wrapper:
+a forked parent shares its pages with the child, so the wrapper's own footprint
+lands in the child's peak. `posix_spawn` plus `wait4` is better but still
+inflated (11,676 KB where the tool reports 5,460 KB). Only the tool's own
+high-water mark is trustworthy, so only graphgrep can currently be measured this
+way.
+
+**kcode, 1,234 tracked files:**
+
+| query | peak RSS |
+|---|---|
+| `grep` (matches nothing) | 5,536 KB |
+| `grep --paths-only fn` | 5,660 KB |
+| `grep fn` (very heavy result) | 12,644 KB |
+| `grep --type rs fn` | 12,628 KB |
+
+**Scaling, same query over synthetic repos:**
+
+| files | peak RSS |
+|---|---|
+| 100 | 4,824 KB |
+| 1,000 | 5,120 KB |
+| 5,000 | 6,108 KB |
+
+## The finding: memory is not flat, and the cause is the file list
+
+4,824 KB at 100 files and 6,108 KB at 5,000 files is **1,284 KB over 4,900
+files, or about 268 bytes per file**. Extrapolated, a million-file repository
+costs roughly 268 MB before any search work happens.
+
+The cause is specific: `collect_file_entries` **materializes the whole file list**
+into a `Vec<FileEntry>` before scanning, because the scan wants a sorted list and
+wants to chunk it across threads. That is the only term in the tool that scales
+with the repository, and it is exactly the class of growth the memory rule
+forbids.
+
+The floor of roughly 4.8 MB is process baseline, binary and libraries, which is
+fine. The 12,644 KB on a very heavy result is the match budget working: `fn`
+matches far more lines than the 20,000-match cap, so storage is bounded, at
+roughly 0.4 KB per stored match.
+
+**The fix is already the next planned change.** `ignore`'s parallel walker
+(`build_parallel`) streams entries instead of collecting them, which removes the
+linear term *and* supplies the parallelism that the latency regression needs. So
+the file-list materialization and the missing threading are one fix, not two, and
+both land in Stage 1c.
+
+## Provisional ceiling
+
+Until the streaming walker lands, nothing can honestly be declared. Provisionally:
+**32 MB peak on any repository up to 100,000 files** — comfortable against every
+number above except the extrapolated file list, which this ceiling is intended to
+force out. Re-measure after Stage 1c and tighten or confirm.
+
 ## Baseline, 2026-09-27
 
 17 tasks, kcode as corpus, `rg` absent so agentgrep uses its native fallback
