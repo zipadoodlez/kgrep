@@ -57,7 +57,9 @@ questions agents actually ask is a smaller broken thing.
 
 ## The core idea
 
-One query surface, two backends behind it.
+One query surface, two backends behind it. `docs/DESIGN.md` holds the longer
+form of this: how the two halves synergize, and how the graph cache is meant to
+build itself. This file stays the settled truth; that one is the aim.
 
 - **Lexical backend** — agentgrep's index-free scan. Always available, instant,
   no setup. This is the floor.
