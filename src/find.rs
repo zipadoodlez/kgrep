@@ -33,7 +33,7 @@ pub fn run_find(root: &Path, args: &FindArgs, budget: Budget) -> Result<Packet, 
         glob: args.scope.glob.as_deref(),
         hidden: args.scope.hidden,
         no_ignore: args.scope.no_ignore,
-        follow: !args.scope.no_follow,
+        follow: args.scope.follow,
     };
     let config = ScanConfig::new(&scope);
     let hits: Arc<Mutex<Vec<Hit>>> = Arc::new(Mutex::new(Vec::new()));
@@ -49,7 +49,7 @@ pub fn run_find(root: &Path, args: &FindArgs, budget: Budget) -> Result<Packet, 
             let Ok(entry) = result else {
                 return WalkState::Continue;
             };
-            if !config.accepts(entry.path(), entry.path_is_symlink()) {
+            if !config.accepts(entry.path()) {
                 return WalkState::Continue;
             }
             let file = config.entry(entry.path());

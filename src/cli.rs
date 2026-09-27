@@ -48,9 +48,15 @@ pub struct ScopeArgs {
     #[arg(long = "no-ignore")]
     pub no_ignore: bool,
 
-    /// Do not follow symlinks while searching.
-    #[arg(long = "no-follow")]
-    pub no_follow: bool,
+    /// Follow symlinks while searching.
+    ///
+    /// Off by default, which matches ripgrep, matches agentgrep v0.1.6 (the
+    /// version kcode runs today, which never followed), and avoids reporting
+    /// the same file twice under a real path and a linked one. Turn it on to
+    /// search through links, accepting that a link into a large external tree
+    /// becomes searchable and that duplicates can appear.
+    #[arg(long)]
+    pub follow: bool,
 
     /// Search this root instead of the current directory.
     #[arg(long)]

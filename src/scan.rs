@@ -27,12 +27,12 @@ pub struct SearchScope<'a> {
     pub glob: Option<&'a str>,
     pub hidden: bool,
     pub no_ignore: bool,
-    /// Follow symlinks during the walk. Defaults to true.
+    /// Follow symlinks during the walk. Off by default; see `cli::ScopeArgs`.
     pub follow: bool,
 }
 
 impl<'a> SearchScope<'a> {
-    /// A plain scope: root only, default ignore rules, symlinks followed.
+    /// A plain scope: root only, default ignore rules, symlinks not followed.
     pub fn new(root: &'a Path) -> Self {
         Self {
             root,
@@ -40,7 +40,7 @@ impl<'a> SearchScope<'a> {
             glob: None,
             hidden: false,
             no_ignore: false,
-            follow: true,
+            follow: false,
         }
     }
 }
@@ -109,12 +109,12 @@ impl ScanConfig {
     }
 
     /// Whether an entry is admissible. Mirrors the collected path exactly.
-    pub fn accepts(&self, path: &Path, is_symlink: bool) -> bool {
-        // Without --follow, ripgrep skips symlinked files entirely; the walker
-        // yields the symlink entry and `is_file()` would stat through it.
-        if !self.follow && is_symlink {
-            return false;
-        }
+    pub fn accepts(&self, path: &Path) -> bool {
+        // `is_file()` follows a symlink, so a link to a file passes and a link
+        // to a directory does not. That is exactly agentgrep v0.1.6's
+        // behaviour, which never set `follow_links` and had no symlink guard:
+        // linked files are searched, linked directories are not descended.
+        // `--follow` adds the directories on top.
         if !path.is_file() {
             return false;
         }
@@ -173,7 +173,7 @@ pub fn collect_file_entries(scope: &SearchScope<'_>) -> Vec<FileEntry> {
         let Ok(entry) = entry else {
             continue;
         };
-        if !config.accepts(entry.path(), entry.path_is_symlink()) {
+        if !config.accepts(entry.path()) {
             continue;
         }
         files.push(config.entry(entry.path()));
@@ -246,3 +246,4 @@ pub fn path_bytes_hex(raw: &[u8]) -> String {
     }
     out
 }
+

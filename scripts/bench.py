@@ -132,6 +132,9 @@ def main() -> int:
         print(f"error: corpus not found: {args.corpus}", file=sys.stderr)
         return 2
 
+    # Absolute, because every task runs with the corpus as the working directory.
+    args.bin = [os.path.abspath(binary) for binary in args.bin]
+
     report = {"corpus": args.corpus, "tasks": len(tasks), "tools": {}}
 
     for binary in args.bin:

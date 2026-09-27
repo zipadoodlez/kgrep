@@ -12,7 +12,7 @@ fn scope(path: &Path) -> ScopeArgs {
         glob: None,
         hidden: false,
         no_ignore: false,
-        no_follow: false,
+        follow: false,
         path: Some(path.display().to_string()),
     }
 }
@@ -442,6 +442,38 @@ fn trace_reports_the_true_total_when_it_caps() {
     assert_eq!(packet.unlisted_files, 1);
 }
 
+#[test]
+fn a_symlinked_directory_is_seen_the_same_way_by_both_walkers() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(root, "src/real/target.rs", "// SYMTOKEN\n");
+    std::os::unix::fs::symlink(root.join("src/real"), root.join("src/linked")).unwrap();
+
+    let scope = kgrep::scan::SearchScope {
+        root,
+        file_type: None,
+        glob: None,
+        hidden: false,
+        no_ignore: false,
+        follow: false,
+    };
+    let collected = kgrep::scan::collect_file_entries(&scope);
+
+    let packet = lexical::run_grep(root, &grep_args(root, "SYMTOKEN", false), Budget::default())
+        .expect("grep runs");
+
+    assert_eq!(
+        collected.len(),
+        packet.hits.len(),
+        "the sequential walker ({}) and the parallel one ({}) disagree about a symlinked \
+         directory: {:?} versus {:?}",
+        collected.len(),
+        packet.hits.len(),
+        collected.iter().map(|e| &e.relative_path).collect::<Vec<_>>(),
+        packet.hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+    );
+}
+
 fn trace_args(terms: &[&str]) -> TraceArgs {
     TraceArgs {
         terms: terms.iter().map(|term| term.to_string()).collect(),
@@ -450,7 +482,7 @@ fn trace_args(terms: &[&str]) -> TraceArgs {
             glob: None,
             hidden: false,
             no_ignore: false,
-            no_follow: false,
+            follow: false,
             path: None,
         },
         max_files: 5,
