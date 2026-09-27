@@ -15,6 +15,8 @@ code actually is, and what comes next. `docs/` holds the longer reasoning.
 - `docs/AGENTGREP.md` — the tool we absorb, and the weaknesses we inherit.
 - `docs/INTEGRATION.md` — the kcode seam: what it is today, and the five decisions
   the swap turns on. A proposal; the facts in it are read from the kcode tree.
+- `docs/KCODE_BRIEF.md` — the handoff for whoever works the kcode side. Self
+  contained, and it tells them to wait for the shape to freeze.
 - `bench/README.md` — the benchmark, the baseline, and one retracted claim.
 
 ## What this is
