@@ -222,3 +222,9 @@ Open:
 
 5. **Graph freshness.** How stale is too stale to prefer the graph backend over
    lexical. Decide when the graph backend lands.
+6. **Attribution (deferred, not optional).** Neither upstream is ours.
+   agentgrep is MIT (`1jehuang`); graphify is Apache-2.0 (`Safi Shamsi and the
+   Graphify contributors`). Absorbing agentgrep's source and porting graphify's
+   design both make graphgrep a derivative work, so a `NOTICE`/`LICENSE`
+   attribution is owed. Deferred to the end of the build by choice, but it must
+   land before graphgrep is released or pointed at by kcode.
