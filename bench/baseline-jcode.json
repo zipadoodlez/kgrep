@@ -1,0 +1,754 @@
+{
+  "corpus": "/home/khaled/jcode",
+  "tasks": 25,
+  "tools": {
+    "/home/khaled/kgrep/bench/oracle/target/release/agentgrep-harness": {
+      "summary": {
+        "tasks": 25,
+        "found": 21,
+        "recall": 0.84,
+        "mean_tokens_to_answer": 318.1,
+        "median_tokens_to_answer": 246.5,
+        "p90_tokens_to_answer": 487.2,
+        "total_output_tokens": 61634.0,
+        "max_output_tokens": 7657.5,
+        "median_latency_ms": 3194.4,
+        "p95_latency_ms": 6350.2
+      },
+      "rows": [
+        {
+          "id": "grep-tool-alias",
+          "args": [
+            "grep",
+            "resolve_tool_name"
+          ],
+          "exit": 0,
+          "found": false,
+          "tokens_to_answer": null,
+          "output_tokens": 1753.8,
+          "output_chars": 7015,
+          "latency_ms": 3991.3,
+          "error": null
+        },
+        {
+          "id": "grep-mcp-tool",
+          "args": [
+            "grep",
+            "mcp_call"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 711.0,
+          "output_tokens": 1918.0,
+          "output_chars": 7672,
+          "latency_ms": 3562.9,
+          "error": null
+        },
+        {
+          "id": "grep-session-search",
+          "args": [
+            "grep",
+            "session_search"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 1686.5,
+          "output_tokens": 4286.5,
+          "output_chars": 17146,
+          "latency_ms": 3653.8,
+          "error": null
+        },
+        {
+          "id": "grep-config-flag",
+          "args": [
+            "grep",
+            "show_agentgrep_output"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 383.2,
+          "output_tokens": 994.8,
+          "output_chars": 3979,
+          "latency_ms": 3601.2,
+          "error": null
+        },
+        {
+          "id": "grep-harness-context",
+          "args": [
+            "grep",
+            "collect_agentgrep_exposure"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 27.2,
+          "output_tokens": 138.8,
+          "output_chars": 555,
+          "latency_ms": 3535.2,
+          "error": null
+        },
+        {
+          "id": "grep-destructive-gate",
+          "args": [
+            "grep",
+            "destructive"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 378.5,
+          "output_tokens": 4518.2,
+          "output_chars": 18073,
+          "latency_ms": 3445.1,
+          "error": null
+        },
+        {
+          "id": "grep-apply-patch",
+          "args": [
+            "grep",
+            "apply_patch"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 307.2,
+          "output_tokens": 7657.5,
+          "output_chars": 30630,
+          "latency_ms": 3452.3,
+          "error": null
+        },
+        {
+          "id": "grep-provider-catalog",
+          "args": [
+            "grep",
+            "apply_openai_compatible_profile_env"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 828.0,
+          "output_tokens": 2534.8,
+          "output_chars": 10139,
+          "latency_ms": 3337.3,
+          "error": null
+        },
+        {
+          "id": "grep-context-window",
+          "args": [
+            "grep",
+            "context_limit_for_model_with_provider_and_cache"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 246.5,
+          "output_tokens": 872.5,
+          "output_chars": 3490,
+          "latency_ms": 3352.9,
+          "error": null
+        },
+        {
+          "id": "grep-webfetch",
+          "args": [
+            "grep",
+            "webfetch"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 405.8,
+          "output_tokens": 2935.2,
+          "output_chars": 11741,
+          "latency_ms": 3194.4,
+          "error": null
+        },
+        {
+          "id": "grep-swarm-stress",
+          "args": [
+            "grep",
+            "swarm"
+          ],
+          "exit": 0,
+          "found": false,
+          "tokens_to_answer": null,
+          "output_tokens": 6385.5,
+          "output_chars": 25542,
+          "latency_ms": 3106.9,
+          "error": null
+        },
+        {
+          "id": "grep-todo-stress",
+          "args": [
+            "grep",
+            "todo"
+          ],
+          "exit": 0,
+          "found": false,
+          "tokens_to_answer": null,
+          "output_tokens": 6806.2,
+          "output_chars": 27225,
+          "latency_ms": 3090.1,
+          "error": null
+        },
+        {
+          "id": "outline-tool-core",
+          "args": [
+            "outline",
+            "crates/jcode-tool-core/src/lib.rs"
+          ],
+          "exit": 0,
+          "found": false,
+          "tokens_to_answer": null,
+          "output_tokens": 377.8,
+          "output_chars": 1511,
+          "latency_ms": 1.7,
+          "error": null
+        },
+        {
+          "id": "outline-models",
+          "args": [
+            "outline",
+            "crates/jcode-provider-core/src/models.rs"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 216.2,
+          "output_tokens": 671.2,
+          "output_chars": 2685,
+          "latency_ms": 2.1,
+          "error": null
+        },
+        {
+          "id": "outline-provider-catalog",
+          "args": [
+            "outline",
+            "crates/jcode-base/src/provider_catalog.rs"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 379.2,
+          "output_tokens": 644.0,
+          "output_chars": 2576,
+          "latency_ms": 2.7,
+          "error": null
+        },
+        {
+          "id": "outline-agentgrep-tool",
+          "args": [
+            "outline",
+            "crates/jcode-app-core/src/tool/agentgrep.rs"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 289.5,
+          "output_tokens": 425.5,
+          "output_chars": 1702,
+          "latency_ms": 1.9,
+          "error": null
+        },
+        {
+          "id": "outline-harness-context",
+          "args": [
+            "outline",
+            "crates/jcode-app-core/src/tool/agentgrep/context.rs"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 103.8,
+          "output_tokens": 464.5,
+          "output_chars": 1858,
+          "latency_ms": 2.2,
+          "error": null
+        },
+        {
+          "id": "find-session-search",
+          "args": [
+            "find",
+            "session",
+            "search"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 22.2,
+          "output_tokens": 1649.0,
+          "output_chars": 6596,
+          "latency_ms": 160.5,
+          "error": null
+        },
+        {
+          "id": "find-debug-socket",
+          "args": [
+            "find",
+            "debug",
+            "socket"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 21.2,
+          "output_tokens": 1682.0,
+          "output_chars": 6728,
+          "latency_ms": 120.7,
+          "error": null
+        },
+        {
+          "id": "find-browser-fast",
+          "args": [
+            "find",
+            "browser",
+            "fast"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 487.2,
+          "output_tokens": 1717.0,
+          "output_chars": 6868,
+          "latency_ms": 88.5,
+          "error": null
+        },
+        {
+          "id": "find-swarm-gallery",
+          "args": [
+            "find",
+            "swarm",
+            "gallery"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 21.0,
+          "output_tokens": 1676.0,
+          "output_chars": 6704,
+          "latency_ms": 87.7,
+          "error": null
+        },
+        {
+          "id": "trace-ollama-context",
+          "args": [
+            "trace",
+            "subject:ollama_context",
+            "relation:defined"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 45.5,
+          "output_tokens": 2229.0,
+          "output_chars": 8916,
+          "latency_ms": 7452.0,
+          "error": null
+        },
+        {
+          "id": "trace-session-search",
+          "args": [
+            "trace",
+            "subject:session_search",
+            "relation:defined"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 42.2,
+          "output_tokens": 2634.2,
+          "output_chars": 10537,
+          "latency_ms": 6350.2,
+          "error": null
+        },
+        {
+          "id": "trace-mcp-call",
+          "args": [
+            "trace",
+            "subject:mcp_call",
+            "relation:defined"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 38.0,
+          "output_tokens": 2599.5,
+          "output_chars": 10398,
+          "latency_ms": 6418.2,
+          "error": null
+        },
+        {
+          "id": "trace-apply-patch",
+          "args": [
+            "trace",
+            "subject:apply_patch",
+            "relation:defined"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 40.8,
+          "output_tokens": 4062.5,
+          "output_chars": 16250,
+          "latency_ms": 6302.4,
+          "error": null
+        }
+      ]
+    },
+    "/home/khaled/kgrep/target/release/kgrep": {
+      "summary": {
+        "tasks": 25,
+        "found": 23,
+        "recall": 0.92,
+        "mean_tokens_to_answer": 891.5,
+        "median_tokens_to_answer": 28.8,
+        "p90_tokens_to_answer": 490.0,
+        "total_output_tokens": 79625.0,
+        "max_output_tokens": 18438.5,
+        "median_latency_ms": 1676.3,
+        "p95_latency_ms": 2087.2
+      },
+      "rows": [
+        {
+          "id": "grep-tool-alias",
+          "args": [
+            "grep",
+            "resolve_tool_name"
+          ],
+          "exit": 0,
+          "found": false,
+          "tokens_to_answer": null,
+          "output_tokens": 1753.8,
+          "output_chars": 7015,
+          "latency_ms": 1472.9,
+          "error": null
+        },
+        {
+          "id": "grep-mcp-tool",
+          "args": [
+            "grep",
+            "mcp_call"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 414.2,
+          "output_tokens": 1918.0,
+          "output_chars": 7672,
+          "latency_ms": 1771.9,
+          "error": null
+        },
+        {
+          "id": "grep-session-search",
+          "args": [
+            "grep",
+            "session_search"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 25.8,
+          "output_tokens": 4059.5,
+          "output_chars": 16238,
+          "latency_ms": 1706.8,
+          "error": null
+        },
+        {
+          "id": "grep-config-flag",
+          "args": [
+            "grep",
+            "show_agentgrep_output"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 726.5,
+          "output_tokens": 994.8,
+          "output_chars": 3979,
+          "latency_ms": 1571.6,
+          "error": null
+        },
+        {
+          "id": "grep-harness-context",
+          "args": [
+            "grep",
+            "collect_agentgrep_exposure"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 27.2,
+          "output_tokens": 138.8,
+          "output_chars": 555,
+          "latency_ms": 1759.9,
+          "error": null
+        },
+        {
+          "id": "grep-destructive-gate",
+          "args": [
+            "grep",
+            "destructive"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 25.0,
+          "output_tokens": 4141.0,
+          "output_chars": 16564,
+          "latency_ms": 1746.7,
+          "error": null
+        },
+        {
+          "id": "grep-apply-patch",
+          "args": [
+            "grep",
+            "apply_patch"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 22.8,
+          "output_tokens": 7426.2,
+          "output_chars": 29705,
+          "latency_ms": 1681.4,
+          "error": null
+        },
+        {
+          "id": "grep-provider-catalog",
+          "args": [
+            "grep",
+            "apply_openai_compatible_profile_env"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 27.5,
+          "output_tokens": 2534.8,
+          "output_chars": 10139,
+          "latency_ms": 1779.4,
+          "error": null
+        },
+        {
+          "id": "grep-context-window",
+          "args": [
+            "grep",
+            "context_limit_for_model_with_provider_and_cache"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 30.0,
+          "output_tokens": 872.5,
+          "output_chars": 3490,
+          "latency_ms": 1885.9,
+          "error": null
+        },
+        {
+          "id": "grep-webfetch",
+          "args": [
+            "grep",
+            "webfetch"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 21.0,
+          "output_tokens": 2633.2,
+          "output_chars": 10533,
+          "latency_ms": 1676.3,
+          "error": null
+        },
+        {
+          "id": "grep-swarm-stress",
+          "args": [
+            "grep",
+            "swarm"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 16504.5,
+          "output_tokens": 18438.5,
+          "output_chars": 73754,
+          "latency_ms": 1950.9,
+          "error": null
+        },
+        {
+          "id": "grep-todo-stress",
+          "args": [
+            "grep",
+            "todo"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 1035.2,
+          "output_tokens": 12848.5,
+          "output_chars": 51394,
+          "latency_ms": 2111.1,
+          "error": null
+        },
+        {
+          "id": "outline-tool-core",
+          "args": [
+            "outline",
+            "crates/jcode-tool-core/src/lib.rs"
+          ],
+          "exit": 0,
+          "found": false,
+          "tokens_to_answer": null,
+          "output_tokens": 374.8,
+          "output_chars": 1499,
+          "latency_ms": 3.7,
+          "error": null
+        },
+        {
+          "id": "outline-models",
+          "args": [
+            "outline",
+            "crates/jcode-provider-core/src/models.rs"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 213.2,
+          "output_tokens": 668.2,
+          "output_chars": 2673,
+          "latency_ms": 4.0,
+          "error": null
+        },
+        {
+          "id": "outline-provider-catalog",
+          "args": [
+            "outline",
+            "crates/jcode-base/src/provider_catalog.rs"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 376.2,
+          "output_tokens": 641.0,
+          "output_chars": 2564,
+          "latency_ms": 3.9,
+          "error": null
+        },
+        {
+          "id": "outline-agentgrep-tool",
+          "args": [
+            "outline",
+            "crates/jcode-app-core/src/tool/agentgrep.rs"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 286.5,
+          "output_tokens": 422.5,
+          "output_chars": 1690,
+          "latency_ms": 3.0,
+          "error": null
+        },
+        {
+          "id": "outline-harness-context",
+          "args": [
+            "outline",
+            "crates/jcode-app-core/src/tool/agentgrep/context.rs"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 100.8,
+          "output_tokens": 461.5,
+          "output_chars": 1846,
+          "latency_ms": 3.3,
+          "error": null
+        },
+        {
+          "id": "find-session-search",
+          "args": [
+            "find",
+            "session",
+            "search"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 22.8,
+          "output_tokens": 1676.5,
+          "output_chars": 6706,
+          "latency_ms": 66.6,
+          "error": null
+        },
+        {
+          "id": "find-debug-socket",
+          "args": [
+            "find",
+            "debug",
+            "socket"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 21.8,
+          "output_tokens": 1709.5,
+          "output_chars": 6838,
+          "latency_ms": 42.6,
+          "error": null
+        },
+        {
+          "id": "find-browser-fast",
+          "args": [
+            "find",
+            "browser",
+            "fast"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 490.0,
+          "output_tokens": 1756.5,
+          "output_chars": 7026,
+          "latency_ms": 47.1,
+          "error": null
+        },
+        {
+          "id": "find-swarm-gallery",
+          "args": [
+            "find",
+            "swarm",
+            "gallery"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 21.5,
+          "output_tokens": 1703.5,
+          "output_chars": 6814,
+          "latency_ms": 51.0,
+          "error": null
+        },
+        {
+          "id": "trace-ollama-context",
+          "args": [
+            "trace",
+            "subject:ollama_context",
+            "relation:defined"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 32.2,
+          "output_tokens": 2785.2,
+          "output_chars": 11141,
+          "latency_ms": 2052.8,
+          "error": null
+        },
+        {
+          "id": "trace-session-search",
+          "args": [
+            "trace",
+            "subject:session_search",
+            "relation:defined"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 28.8,
+          "output_tokens": 2311.5,
+          "output_chars": 9246,
+          "latency_ms": 2087.2,
+          "error": null
+        },
+        {
+          "id": "trace-mcp-call",
+          "args": [
+            "trace",
+            "subject:mcp_call",
+            "relation:defined"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 24.5,
+          "output_tokens": 2601.5,
+          "output_chars": 10406,
+          "latency_ms": 2060.6,
+          "error": null
+        },
+        {
+          "id": "trace-apply-patch",
+          "args": [
+            "trace",
+            "subject:apply_patch",
+            "relation:defined"
+          ],
+          "exit": 0,
+          "found": true,
+          "tokens_to_answer": 27.2,
+          "output_tokens": 4753.2,
+          "output_chars": 19013,
+          "latency_ms": 2095.0,
+          "error": null
+        }
+      ]
+    }
+  }
+}

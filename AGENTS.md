@@ -277,7 +277,7 @@ subject is written `mcp_call` and the type that defines it is written
 `McpCallInput`. Without that, `relation:defined` could never find a definition.
 
 **One deliberate gap**, recorded in `src/trace.rs`: agentgrep's `--context-json`
-familiarity is accepted but not applied. That is harness state, which is Stage 6,
+familiarity is accepted but not applied. That is harness state, which is Stage 5,
 and half-porting it would put the seam in the wrong place.
 
 ### Stage 3 — make the measurement absolute (done)
@@ -312,7 +312,7 @@ so search-then-read round-trips.
 ### Stage 4 — real structure, and the grokking (next)
 
 Adopt `ast-grep-core` and `ast-grep-language` (skip `ast-grep-config`), with a
-small query file per language. Keep the line-based scanner as the fallback for
+small per-language kind table. Keep the line-based scanner as the fallback for
 languages without a grammar.
 
 This is where the "grokking" actually lives, and it is a **signal, not a separate
@@ -321,6 +321,10 @@ imports. Those change the answers to ordinary questions, which is where the valu
 is. Containment is free from the parse and imports are precise, so the high-value
 version is also the cheap one, and no cross-file resolution is needed.
 
+It is also the only candidate that fixes the three measured ranking regressions,
+which trace to struct fields not being visible to the line scanner. That is the
+one benefit we can measure today, and it is what has to justify the stage.
+
 Two things to get right here because they are cheap now and expensive later:
 
 - **Stable symbol identity** and a name index, so a symbol can be addressed by
@@ -328,24 +332,35 @@ Two things to get right here because they are cheap now and expensive later:
 - **Real ranges**, replacing the current approximation where an item ends on the
   line before the next item begins.
 
-- **Exit:** nested structure available; outline more accurate; tokens and latency
-  no worse.
+- **Exit:** the three ranking regressions close; nested structure available;
+  outline more accurate; tokens and latency no worse.
 
-### Stage 5 — symbol-scoped edits (cheap tier)
+#### Footnote: symbol-scoped edits come free, and are not a stage
 
-Once ranges are real, the pieces an agent wants most become available **without
-any cross-file resolution**: replace a symbol's body, insert before or after a
-symbol, delete it. That is most of the convenience and almost none of the risk,
-and it is the largest token win in the whole plan, because it removes the need to
-generate a diff.
+If ranges become real, a fourth way to address an edit becomes available: name a
+symbol instead of quoting its text or giving line numbers, so the tool resolves
+the range and replaces the body, inserts around it, or deletes it.
 
-The tool returns a diff for the harness to apply and review. It does not write
-files, so kcode keeps its permission model and its checkpointing.
+That is worth having because `edit` requires the caller to echo the text being
+replaced, and `patch` costs *more*, since a unified diff contains the removed
+lines. But it is **an optimization of a working path, not a missing capability**:
+the edit is achievable today, only more expensively. For a whole-function
+rewrite of N lines the saving is roughly half of that one call's output, which is
+worth something and is nowhere near an order of magnitude. It has not been
+measured, and the benchmark has no edit-shaped tasks.
 
-- **Exit:** measurable token drop on edit-shaped tasks; no new failure mode worse
-  than a rejected diff.
+There is also an 80% version needing no parse at all: let `edit` accept a line
+range as an alternative anchor. The caller already has line numbers from `read`
+and `outline`. What symbol addressing adds on top is surviving drift, because it
+re-resolves by name, and expressing intent, because "replace `parse_config`" says
+what is meant while "replace lines 40 to 120" is a promise about layout.
 
-### Stage 6 — harness state as a source
+So this is not a stage. It is a bonus that arrives with Stage 4, and if Stage 4
+does not happen we lose an unmeasured optimization rather than a capability. If
+it does happen, the edit applies directly and shows a diff, exactly as `edit` does
+today, reusing the checkpoint path rather than inventing a second one.
+
+### Stage 5 — harness state as a source
 
 What the agent has already read, what changed since the last call, where the user
 is working. Nearly free, and the one advantage an in-harness tool has that no
@@ -353,7 +368,7 @@ external tool can match. agentgrep touches it with `context.json`.
 
 - **Exit:** measurable improvement on tasks where prior reading is relevant.
 
-### Stage 7 — resolution, approximate and ours
+### Stage 6 — resolution, approximate and ours
 
 "What uses this", answered by name-based resolution over our own index: which
 symbols share a name, which imports bring that name into scope, which files could
@@ -371,7 +386,7 @@ refactoring engine.
 - **Exit:** a references verb that is useful to read, with its imprecision stated
   in the output rather than hidden.
 
-### Stage 8 — the graph artifact, last and optional
+### Stage 7 — the graph artifact, last and optional
 
 Only the report-shaped questions, as a separate mmapped artifact: what is central,
 what clusters, what is surprising. Note that the *valuable* part of the graph idea
@@ -505,10 +520,11 @@ Settled by decision, not by evidence:
   rename, find-implementations, and type hierarchy, because that needs
   compiler-accurate resolution that only a language server provides.
 - **The graph is a signal, not a product.** Its value lands in Stage 4 as ranking
-  and zoom over the shaper. The separate artifact is Stage 8 and may not earn its
+  and zoom over the shaper. The separate artifact is Stage 7 and may not earn its
   place.
-- **Editing is staged.** Symbol-scoped edits within a file need only real ranges
-  (Stage 5). Cross-file operations need exact resolution and are gated on Stage 7
+- **Editing is staged.** Symbol-scoped edits within a file need only real ranges,
+  which Stage 4 would provide, and are a bonus of it rather than a stage of their
+  own. Cross-file operations need exact resolution and are gated on Stage 6
   producing evidence of it. Approximate resolution is fine for ranking and fatal
   for rewriting, so the gate is real.
 - **Supersede agentgrep, and send the obviously-correct fixes upstream first.**
