@@ -170,16 +170,13 @@ Open, and genuinely unknown:
 - **What is the right default token budget?** Unknown until measured.
 - **How should the tail be ordered?** If we name every matching file, in what
   order, and does that order matter to a model?
-- **Does structural ranking actually improve answers?** Testable once a graph or
-  AST source exists. Currently an assumption.
-- **Is the graph ever worth building**, given flat memory and that its questions
-  are the rarest ones?
-- **Where does the scope stop?** Retrieval only, or also symbol-level rewriting?
-  Serena does both; we have assumed retrieval only.
+- **Does structural ranking actually improve answers?** Testable once the AST
+  source exists. Currently an assumption, and it is the assumption Stage 4 rests
+  on.
 - **The name.** `graphgrep` names a source we demoted. Every dictionary word
   checked is taken on crates.io, and `treegrep`/`agrep` collide in the same
   namespace. Unresolved.
-- **Graph freshness policy.** How stale is too stale, if we ever build it.
+- **Graph freshness policy.** How stale is too stale, if the artifact is built.
 
 ## What we have measured
 
@@ -267,17 +264,43 @@ round-trip so `outline` accepts what `grep` emits.
 - **Exit:** parity on UTF-8 corpora, deliberate differences written down, and the
   benchmark measuring the harness path.
 
-### Stage 4 — real structure
+### Stage 4 — real structure, and the grokking
 
 Adopt `ast-grep-core` and `ast-grep-language` (skip `ast-grep-config`), with a
 small query file per language. Keep the line-based scanner as the fallback for
-languages without a grammar. This is where nesting and zoom arrive at no resident
-cost.
+languages without a grammar.
+
+This is where the "grokking" actually lives, and it is a **signal, not a separate
+map**: which symbol a hit lives in, how deep it sits, what it contains, what it
+imports. Those change the answers to ordinary questions, which is where the value
+is. Containment is free from the parse and imports are precise, so the high-value
+version is also the cheap one, and no cross-file resolution is needed.
+
+Two things to get right here because they are cheap now and expensive later:
+
+- **Stable symbol identity** and a name index, so a symbol can be addressed by
+  something other than a line number.
+- **Real ranges**, replacing the current approximation where an item ends on the
+  line before the next item begins.
 
 - **Exit:** nested structure available; outline more accurate; tokens and latency
   no worse.
 
-### Stage 5 — harness state as a source
+### Stage 5 — symbol-scoped edits (cheap tier)
+
+Once ranges are real, the pieces an agent wants most become available **without
+any cross-file resolution**: replace a symbol's body, insert before or after a
+symbol, delete it. That is most of the convenience and almost none of the risk,
+and it is the largest token win in the whole plan, because it removes the need to
+generate a diff.
+
+The tool returns a diff for the harness to apply and review. It does not write
+files, so kcode keeps its permission model and its checkpointing.
+
+- **Exit:** measurable token drop on edit-shaped tasks; no new failure mode worse
+  than a rejected diff.
+
+### Stage 6 — harness state as a source
 
 What the agent has already read, what changed since the last call, where the user
 is working. Nearly free, and the one advantage an in-harness tool has that no
@@ -285,21 +308,37 @@ external tool can match. agentgrep touches it with `context.json`.
 
 - **Exit:** measurable improvement on tasks where prior reading is relevant.
 
-### Stage 6 — resolution, the largest capability gap
+### Stage 7 — resolution, and the gate on cross-file edits
 
 "What uses this" and "what implements this", the questions an agent needs before
 editing. Consume via MCP if a language server is already running; otherwise
-name-based resolution over our own structure. This is the bet the whole project
-rests on, and it is deliberately late because it is the riskiest.
+name-based resolution over our own structure.
 
-- **Exit:** a references verb whose precision is good enough to act on.
+This stage is also **the gate on the expensive tier of editing**: rename across
+the codebase, safe delete, move. Approximate resolution is fine for ranking and
+fatal for rewriting, so those operations wait on evidence that resolution is
+exact. If it is, they become a small addition. If it is not, they were never
+possible and the question closes itself.
 
-### Stage 7 — the graph, last and optional
+- **Exit:** a references verb whose precision is good enough to act on, and a
+  decision on whether cross-file edits follow.
 
-An mmapped artifact answering only the architectural questions: what is central,
-what clusters, how things link. Only if it earns its place after 1 through 6.
+### Stage 8 — the graph artifact, last and optional
+
+Only the report-shaped questions, as a separate mmapped artifact: what is central,
+what clusters, what is surprising. Note that the *valuable* part of the graph idea
+is Stage 4, as a ranking and zoom signal over the shaper. This stage is what
+remains once that is done, and it may not earn its place.
 
 - **Exit:** it answers something the earlier stages cannot, at no resident cost.
+
+### Cheap win, available now
+
+The output cap belongs in the library, not the caller. That is a small,
+clearly-correct fix to agentgrep that upstream would plausibly accept, and if it
+lands, kcode improves immediately without this project shipping anything. See
+`docs/AGENTGREP.md`, weakness 5. Worth attempting regardless of how this project
+goes, and good faith while superseding someone's work.
 
 ### Gate — the swap
 
@@ -318,8 +357,8 @@ instead. Deciding that early is a win, not a failure.
 
 Language servers in-process, embedding models, vector stores, installers, hooks
 managers, editors, MCP/HTTP servers, watch mode, HTML/canvas/SVG/wiki exporters,
-media or document ingest, refactoring and rewriting, and any resident structure
-proportional to repository size.
+media or document ingest, cross-file rewriting (gated on Stage 7's evidence), and
+any resident structure proportional to repository size.
 
 ## Consumers and the kcode seam
 
@@ -402,8 +441,22 @@ flatness for its own sake. No language servers or embedding models in-process.
 graphify contributes ideas, agentgrep contributes code. No dependency swap until
 done. Initial extraction languages: Rust, Python, TypeScript/JavaScript, Go.
 
-Open: the name. The grep relevance score. The default token budget. Whether the
-graph is ever worth building. Graph freshness. Whether scope includes rewriting.
+Settled by decision, not by evidence:
+
+- **One consumer: kcode only.** No MCP server, no third-party CLI contract, and
+  kcode's integration site and tool names are ours to change. This is why
+  harness state is a real advantage rather than a theoretical one.
+- **The graph is a signal, not a product.** Its value lands in Stage 4 as ranking
+  and zoom over the shaper. The separate artifact is Stage 8 and may not earn its
+  place.
+- **Editing is staged.** Symbol-scoped edits within a file need only real ranges
+  (Stage 5). Cross-file operations need exact resolution and are gated on Stage 7
+  producing evidence of it. Approximate resolution is fine for ranking and fatal
+  for rewriting, so the gate is real.
+- **Supersede agentgrep, and send the obviously-correct fixes upstream first.**
+
+Open: the name. The grep relevance score. The default token budget. Graph
+freshness. Whether cross-file edits follow resolution.
 
 ## Attribution
 
