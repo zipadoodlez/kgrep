@@ -102,6 +102,54 @@
       "question": "Show me the symbols in the harness context file.",
       "args": ["outline", "crates/jcode-app-core/src/tool/agentgrep/context.rs"],
       "expect_symbol": "collect_agentgrep_exposure"
+    },
+    {
+      "id": "find-session-search",
+      "question": "Which files are about searching sessions?",
+      "args": ["find", "session", "search"],
+      "expect_path": "crates/jcode-app-core/src/tool/session_search.rs"
+    },
+    {
+      "id": "find-debug-socket",
+      "question": "Which files are about the debug socket?",
+      "args": ["find", "debug", "socket"],
+      "expect_path": "crates/jcode-app-core/src/tool/debug_socket.rs"
+    },
+    {
+      "id": "find-browser-fast",
+      "question": "Which files are about the fast browser tool?",
+      "args": ["find", "browser", "fast"],
+      "expect_path": "crates/jcode-app-core/src/tool/browser_fast.rs"
+    },
+    {
+      "id": "find-swarm-gallery",
+      "question": "Which files are about the swarm gallery?",
+      "args": ["find", "swarm", "gallery"],
+      "expect_path": "crates/jcode-tui-render/src/swarm_gallery.rs"
+    },
+    {
+      "id": "trace-ollama-context",
+      "question": "Where is the ollama context length enrichment defined?",
+      "args": ["trace", "subject:ollama_context", "relation:defined"],
+      "expect_path": "crates/jcode-provider-openrouter-runtime/src/ollama_context.rs"
+    },
+    {
+      "id": "trace-session-search",
+      "question": "Where is the session search tool defined?",
+      "args": ["trace", "subject:session_search", "relation:defined"],
+      "expect_path": "crates/jcode-app-core/src/tool/session_search.rs"
+    },
+    {
+      "id": "trace-mcp-call",
+      "question": "Where is the MCP call tool defined? (a definition whose body never repeats its own name)",
+      "args": ["trace", "subject:mcp_call", "relation:defined"],
+      "expect_path": "crates/jcode-app-core/src/tool/mcp.rs"
+    },
+    {
+      "id": "trace-apply-patch",
+      "question": "Where is the apply_patch tool defined?",
+      "args": ["trace", "subject:apply_patch", "relation:defined"],
+      "expect_path": "crates/jcode-app-core/src/tool/apply_patch.rs"
     }
   ]
 }

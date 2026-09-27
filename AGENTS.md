@@ -251,14 +251,36 @@ should close when Stage 4 lands.
 So **kgrep now beats agentgrep on both objectives**: 3.8x better on median tokens
 to the answer, 2.5x better on p90, 9.6x better on the worst case, and faster.
 
-### Stage 2 — four verbs on one core (next)
+### Stage 2 — four verbs on one core (done)
 
-Port `find` and `trace` onto the shaper. Required before the swap, and it is where
-ranking lands properly for the other three verbs.
+All four verbs are on the shaper, sharing one ranking weight table rather than
+carrying a copy each, which was the specific duplication agentgrep had between
+`find` and `trace`. The walk streams and is parallel for all of them, and the
+packet bound applies to all of them.
 
-- **Exit:** all four verbs implemented and covered by the benchmark.
+**Parity against agentgrep 0.1.6 on kcode:** `find` produced an identical top
+result on all ten queries sampled, and `trace` on 16 of 16.
 
-### Stage 3 — make the measurement absolute
+**`trace` found three real bugs**, all the same shape, a literal check
+short-circuiting a normalised one:
+
+1. Regions were only seeded from lines containing the subject, so a declaration
+   whose body never repeats its own name was invisible, and a test that merely
+   mentioned the name outranked the definition it was testing.
+2. Symbols whose *name* matches the subject are now candidates in their own
+   right.
+3. The subject gate and an empty-mention early return both rejected such a file
+   before the label-driven regions could run.
+
+The fix that mattered: names are compared with punctuation stripped, because a
+subject is written `mcp_call` and the type that defines it is written
+`McpCallInput`. Without that, `relation:defined` could never find a definition.
+
+**One deliberate gap**, recorded in `src/trace.rs`: agentgrep's `--context-json`
+familiarity is accepted but not applied. That is harness state, which is Stage 6,
+and half-porting it would put the seam in the wrong place.
+
+### Stage 3 — make the measurement absolute (next)
 
 The CLI harness is fine for relative A/B, which is all Stage 1 needs, because the
 two tools are measured the same way. It is not fine for claims about what a model

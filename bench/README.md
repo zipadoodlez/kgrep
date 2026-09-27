@@ -120,17 +120,20 @@ reproduced agentgrep's output to within a token per task.
 | agentgrep 0.1.6 | 17/17 | 383 | 1,762 | 154,351 |
 | kgrep (path order) | 17/17 | 383 | 1,762 | 154,356 |
 
-**Now, with ranked output and a streamed parallel walk.** This is the current
-standing, and it is better than agentgrep on both objectives:
+**Now, with all four verbs**, ranked output, a streamed parallel walk, and a
+bounded packet. 25 tasks covering `grep`, `find`, `outline` and `trace`:
 
 | tool | recall | median tok→ans | p90 | max out tok | median latency | p95 |
 |---|---|---|---|---|---|---|
-| agentgrep 0.1.6 | 17/17 | 383.2 | 1,762.5 | 154,351 | 21.5 ms | 34.5 ms |
-| kgrep | 17/17 | **100.8** | **703.8** | **16,061** | **18.1 ms** | **28.8 ms** |
+| agentgrep 0.1.6 | 25/25 | 289.5 | 974.5 | 154,351 | 18.8 ms | 51.8 ms |
+| kgrep | 25/25 | **28.8** | **464.8** | **16,061** | **13.7 ms** | **30.9 ms** |
 
-So kgrep is **3.8x better on median tokens to the answer, 2.5x better on p90,
-9.6x better on the worst case, and faster too**. Stage 1's exit criteria are all
-met; see below.
+So on the full surface kgrep is **10x better on median tokens to the answer, 2.1x
+better on p90, 9.6x better on the worst case, and faster**. Stage 1's exit
+criteria are met and Stage 2 is complete; details below.
+
+Beyond recall, agreement was checked per task: `find` produced an identical top
+result to agentgrep on all ten queries sampled, and `trace` on 16 of 16.
 
 Latency is per call, including process start-up, which a harness calling
 in-process does not pay. So these overstate what kcode sees and are best read as
