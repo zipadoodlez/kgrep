@@ -1,8 +1,8 @@
 //! The shaper end to end: choose files, match, group, packet.
 
-use kgrep::cli::{FindArgs, GrepArgs, OutlineArgs, ScopeArgs};
+use kgrep::cli::{FindArgs, FullRegionMode, GrepArgs, OutlineArgs, ScopeArgs, TraceArgs};
 use kgrep::model::Budget;
-use kgrep::{find, lexical, outline};
+use kgrep::{find, lexical, outline, trace};
 use std::fs;
 use std::path::Path;
 
@@ -295,7 +295,11 @@ fn find_refuses_a_file_whose_path_says_nothing() {
     let root = dir.path();
     // The body is full of the term, but the path says nothing about it. This is
     // the difference between discovery and search.
-    write(root, "src/other.rs", "// auth session auth session\npub fn x() {}\n");
+    write(
+        root,
+        "src/other.rs",
+        "// auth session auth session\npub fn x() {}\n",
+    );
 
     let args = FindArgs {
         query_parts: vec!["auth".to_string(), "session".to_string()],
@@ -335,6 +339,129 @@ fn find_reports_the_true_total_when_it_caps() {
     assert_eq!(packet.hits.len(), 2);
     assert_eq!(packet.total_files, 3, "the total stays honest");
     assert_eq!(packet.unlisted_files, 1);
+}
+
+#[test]
+fn trace_requires_a_subject_and_a_relation() {
+    assert!(trace::parse_query(["relation:defined"]).is_err());
+    assert!(trace::parse_query(["subject:x"]).is_err());
+    assert!(trace::parse_query(["subject:x", "nonsense:y"]).is_err());
+
+    let query = trace::parse_query([
+        "subject:auth_status",
+        "relation:rendered",
+        "support:ui",
+        "kind:code",
+        "path:src/tui",
+    ])
+    .expect("parses");
+    assert_eq!(query.subject, "auth_status");
+    assert_eq!(query.relation, kgrep::model::Relation::Rendered);
+    assert_eq!(query.support, vec!["ui".to_string()]);
+    assert_eq!(query.kind.as_deref(), Some("code"));
+    assert_eq!(query.path_hint.as_deref(), Some("src/tui"));
+}
+
+#[test]
+fn trace_finds_a_definition_spelled_differently() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    // The subject is written with underscores; the type that defines it is
+    // camel case, and its body never repeats the name. Comparing the raw
+    // strings finds neither.
+    write(
+        root,
+        "src/mcp.rs",
+        "pub struct McpCallInput {\n    server: String,\n    tool: String,\n}\n",
+    );
+    write(
+        root,
+        "src/tests.rs",
+        // The test function mentions the subject in its body but not in its
+        // name, which is what the real case looks like. Naming it after the
+        // subject would make its own label match and hand it the same bonus a
+        // declaration gets.
+        "fn checks_the_surface() {\n    let a = \"mcp_call\";\n    let b = \"mcp_call\";\n}\n",
+    );
+
+    let args = trace_args(&["subject:mcp_call", "relation:defined"]);
+    let packet = trace::run_trace(root, &args, Budget::default()).expect("trace runs");
+
+    assert_eq!(
+        packet.hits[0].path,
+        "src/mcp.rs",
+        "the definition should outrank the mention, got {:?}",
+        packet.hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+    );
+    let regions = &packet.hits[0].regions;
+    assert!(
+        regions.iter().any(|region| region.label == "McpCallInput"),
+        "the declaration is a region even though its body never names it, got {:?}",
+        regions.iter().map(|r| &r.label).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn trace_kind_code_excludes_documentation() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "docs/notes.md",
+        "# auth_status\n\nauth_status is rendered\n",
+    );
+    write(root, "src/view.rs", "// auth_status\npub fn draw() {}\n");
+
+    let args = trace_args(&["subject:auth_status", "relation:rendered", "kind:code"]);
+    let packet = trace::run_trace(root, &args, Budget::default()).expect("trace runs");
+
+    assert!(
+        packet.hits.iter().all(|hit| !hit.path.ends_with(".md")),
+        "docs should be filtered by kind:code"
+    );
+}
+
+#[test]
+fn trace_reports_the_true_total_when_it_caps() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for name in ["a", "b", "c"] {
+        write(
+            root,
+            &format!("src/{name}.rs"),
+            "// widget\npub fn draw() {}\n",
+        );
+    }
+
+    let mut args = trace_args(&["subject:widget", "relation:rendered"]);
+    args.max_files = 2;
+    let packet = trace::run_trace(root, &args, Budget::default()).expect("trace runs");
+
+    assert_eq!(packet.hits.len(), 2);
+    assert_eq!(packet.total_files, 3, "the total stays honest");
+    assert_eq!(packet.unlisted_files, 1);
+}
+
+fn trace_args(terms: &[&str]) -> TraceArgs {
+    TraceArgs {
+        terms: terms.iter().map(|term| term.to_string()).collect(),
+        scope: ScopeArgs {
+            file_type: None,
+            glob: None,
+            hidden: false,
+            no_ignore: false,
+            no_follow: false,
+            path: None,
+        },
+        max_files: 5,
+        max_regions: 6,
+        full_region: FullRegionMode::Auto,
+        json: false,
+        paths_only: false,
+        debug_plan: false,
+        debug_score: false,
+        context_json: None,
+    }
 }
 
 #[test]

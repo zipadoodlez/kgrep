@@ -1,7 +1,7 @@
 use clap::Parser;
 use kgrep::cli::{Cli, Command};
 use kgrep::model::Budget;
-use kgrep::{find, lexical, outline, packet, peak};
+use kgrep::{find, lexical, outline, packet, peak, trace};
 use std::path::PathBuf;
 
 fn resolve_root(path: &Option<String>) -> PathBuf {
@@ -96,9 +96,29 @@ fn main() {
                 }
             }
         }
-        Command::Trace(_) => {
-            eprintln!("error: `trace` is not implemented yet");
-            2
+        Command::Trace(args) => {
+            let root = resolve_root(&args.scope.path);
+            match trace::run_trace(&root, args, Budget::default()) {
+                Ok(packet) => {
+                    if args.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&packet::trace_json(&packet))
+                                .expect("serialize trace json")
+                        );
+                    } else {
+                        println!("{}", packet::render_trace_text(&packet, args));
+                    }
+                    0
+                }
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    eprintln!();
+                    eprintln!("trace queries use a small DSL. Example:");
+                    eprintln!("  kgrep trace subject:auth_status relation:rendered support:ui");
+                    2
+                }
+            }
         }
     };
 

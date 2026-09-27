@@ -116,7 +116,7 @@ fn render_grep_hit(hit: &Hit, args: &GrepArgs, lines: &mut Vec<String>) {
             _ => lines.push(format!("    - {}", group.label)),
         }
         for line_match in visible {
-            let text = compact_rendered_match_line(&line_match.line_text, args);
+            let text = compact_rendered_match_line(&line_match.line_text, &args.query, args.regex);
             lines.push(format!("      - @ {} {}", line_match.line_number, text));
             displayed += 1;
         }
@@ -160,16 +160,16 @@ fn non_code_match_cap(language: &str) -> Option<usize> {
 
 /// Cap a rendered match line, keeping context around the first occurrence of
 /// the query so a minified file cannot flood the caller.
-pub fn compact_rendered_match_line(line: &str, args: &GrepArgs) -> String {
+pub fn compact_rendered_match_line(line: &str, query: &str, regex: bool) -> String {
     let char_count = line.chars().count();
     if char_count <= MAX_RENDERED_MATCH_LINE_CHARS {
         return line.to_string();
     }
 
-    let match_start_char = if args.regex || args.query.is_empty() {
+    let match_start_char = if regex || query.is_empty() {
         0
     } else {
-        line.find(&args.query)
+        line.find(query)
             .map(|byte| line[..byte].chars().count())
             .unwrap_or(0)
     };
@@ -403,6 +403,136 @@ pub fn find_json(packet: &Packet) -> serde_json::Value {
         unlisted_files: packet.unlisted_files,
     })
     .expect("find JSON is always serializable")
+}
+
+// --- trace -----------------------------------------------------------------
+
+pub fn render_trace_text(packet: &Packet, args: &crate::cli::TraceArgs) -> String {
+    if args.paths_only {
+        return packet
+            .hits
+            .iter()
+            .map(|hit| hit.path.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+
+    let mut lines = vec![
+        format!("query: {}", packet.query),
+        format!("files: {} shown", packet.hits.len()),
+    ];
+
+    for (idx, hit) in packet.hits.iter().enumerate() {
+        lines.push(String::new());
+        lines.push(format!("{}. {}", idx + 1, hit.path));
+        lines.push(format!("   role: {}  language: {}", hit.role, hit.language));
+        if args.debug_score {
+            lines.push(format!("   score: {}", hit.score));
+        }
+        lines.push("   why:".to_string());
+        for reason in &hit.why {
+            lines.push(format!("     - {reason}"));
+        }
+        for region in &hit.regions {
+            lines.push(String::new());
+            lines.push(format!(
+                "   - {} {} @ {}-{}",
+                region.kind, region.label, region.start_line, region.end_line
+            ));
+            if args.debug_score {
+                lines.push(format!("     region score: {}", region.score));
+                for reason in &region.why {
+                    lines.push(format!("       - {reason}"));
+                }
+            }
+            for line in &region.lines {
+                lines.push(format!(
+                    "     @ {} {}",
+                    line.line_number,
+                    compact_rendered_match_line(&line.line_text, &packet.query, false)
+                ));
+            }
+        }
+    }
+
+    if packet.unlisted_files > 0 {
+        lines.push(String::new());
+        lines.push(format!(
+            "... {} more matching files not listed; raise --max-files or narrow the query",
+            packet.unlisted_files
+        ));
+    }
+
+    lines.join("\n")
+}
+
+#[derive(Serialize)]
+struct TraceJson<'a> {
+    query: &'a str,
+    root: &'a str,
+    files: Vec<TraceFileJson<'a>>,
+    total_files: usize,
+    unlisted_files: usize,
+}
+
+#[derive(Serialize)]
+struct TraceFileJson<'a> {
+    path: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path_bytes: Option<&'a str>,
+    role: &'a str,
+    language: &'a str,
+    score: i32,
+    why: &'a [String],
+    regions: Vec<TraceRegionJson<'a>>,
+}
+
+#[derive(Serialize)]
+struct TraceRegionJson<'a> {
+    kind: &'a str,
+    label: &'a str,
+    start_line: usize,
+    end_line: usize,
+    score: i32,
+    why: &'a [String],
+    lines: &'a [crate::model::LineMatch],
+}
+
+pub fn trace_json(packet: &Packet) -> serde_json::Value {
+    let files = packet
+        .hits
+        .iter()
+        .map(|hit| TraceFileJson {
+            path: &hit.path,
+            path_bytes: hit.path_bytes.as_deref(),
+            role: &hit.role,
+            language: &hit.language,
+            score: hit.score,
+            why: &hit.why,
+            regions: hit
+                .regions
+                .iter()
+                .map(|region| TraceRegionJson {
+                    kind: &region.kind,
+                    label: &region.label,
+                    start_line: region.start_line,
+                    end_line: region.end_line,
+                    score: region.score,
+                    why: &region.why,
+                    lines: &region.lines,
+                })
+                .collect(),
+        })
+        .collect();
+
+    serde_json::to_value(TraceJson {
+        query: &packet.query,
+        root: &packet.root,
+        files,
+        total_files: packet.total_files,
+        unlisted_files: packet.unlisted_files,
+    })
+    .expect("trace JSON is always serializable")
 }
 
 // --- outline ---------------------------------------------------------------

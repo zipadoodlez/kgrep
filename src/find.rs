@@ -81,7 +81,12 @@ pub fn run_find(root: &Path, args: &FindArgs, budget: Budget) -> Result<Packet, 
                 return WalkState::Continue;
             }
 
-            let shown = structure.items.iter().take(SHOWN_SYMBOLS).cloned().collect();
+            let shown = structure
+                .items
+                .iter()
+                .take(SHOWN_SYMBOLS)
+                .cloned()
+                .collect();
             let hit = Hit {
                 path: file.display_path(),
                 path_bytes: file.path_bytes_hex(),
@@ -99,6 +104,7 @@ pub fn run_find(root: &Path, args: &FindArgs, budget: Budget) -> Result<Packet, 
                 other_symbols_omitted_count: structure.items.len().saturating_sub(SHOWN_SYMBOLS),
                 omitted_matches: 0,
                 summarized: false,
+                regions: Vec::new(),
             };
             hits.lock().expect("find accumulator").push(hit);
             WalkState::Continue
@@ -138,5 +144,7 @@ pub fn run_find(root: &Path, args: &FindArgs, budget: Budget) -> Result<Packet, 
 fn has_path_evidence(query_lower: &str, tokens: &[String], relative_path: &str) -> bool {
     let path_lower = relative_path.to_ascii_lowercase();
     path_lower.contains(query_lower)
-        || tokens.iter().any(|token| path_lower.contains(token.as_str()))
+        || tokens
+            .iter()
+            .any(|token| path_lower.contains(token.as_str()))
 }

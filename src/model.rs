@@ -55,7 +55,76 @@ pub enum Query {
     /// Structure of one known file.
     Outline { file: String },
     /// Structured investigation: a subject, a relation, and supporting terms.
-    Structural { subject: String },
+    Structural(StructuralQuery),
+}
+
+/// What a `trace` asks for, once the DSL has been parsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralQuery {
+    pub subject: String,
+    pub relation: Relation,
+    pub support: Vec<String>,
+    /// Restrict by file role, for example `code` or `test`.
+    pub kind: Option<String>,
+    /// Restrict to a subtree by substring.
+    pub path_hint: Option<String>,
+}
+
+/// The relation between the subject and what the caller is looking for. This is
+/// the whole reason `trace` exists: `grep` can find a name, only a relation can
+/// say what about the name matters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Relation {
+    Defined,
+    CalledFrom,
+    TriggeredFrom,
+    Rendered,
+    Populated,
+    ComesFrom,
+    Handled,
+    Implementation,
+    Custom(String),
+}
+
+impl StructuralQuery {
+    /// The human-facing label, used in output headers and JSON.
+    pub fn label(&self) -> String {
+        format!(
+            "subject:{} relation:{}",
+            self.subject,
+            self.relation.as_str()
+        )
+    }
+}
+
+impl Relation {
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+            "defined" | "definition" => Self::Defined,
+            "called_from" | "calledfrom" | "callers" => Self::CalledFrom,
+            "triggered_from" | "triggeredfrom" | "trigger" => Self::TriggeredFrom,
+            "rendered" | "render" | "drawn" => Self::Rendered,
+            "populated" | "populate" | "set" | "assigned" => Self::Populated,
+            "comes_from" | "comesfrom" | "source" | "origin" => Self::ComesFrom,
+            "handled" | "handler" | "handles" => Self::Handled,
+            "implementation" | "implemented" => Self::Implementation,
+            other => Self::Custom(other.to_string()),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Defined => "defined",
+            Self::CalledFrom => "called_from",
+            Self::TriggeredFrom => "triggered_from",
+            Self::Rendered => "rendered",
+            Self::Populated => "populated",
+            Self::ComesFrom => "comes_from",
+            Self::Handled => "handled",
+            Self::Implementation => "implementation",
+            Self::Custom(value) => value.as_str(),
+        }
+    }
 }
 
 impl Query {
@@ -65,9 +134,26 @@ impl Query {
             Query::Lexical { text, .. } => text.clone(),
             Query::Path { terms } => terms.join(" "),
             Query::Outline { file } => file.clone(),
-            Query::Structural { subject } => subject.clone(),
+            Query::Structural(query) => query.label(),
         }
     }
+}
+
+/// A scored span inside a file, reported by `trace`.
+///
+/// A region is where a subject mention lives and what surrounds it, which is
+/// what makes `trace` worth having over `grep`: the answer is a place to read,
+/// not a list of lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Region {
+    pub kind: String,
+    pub label: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub score: i32,
+    pub why: Vec<String>,
+    /// The lines shown for this region, already trimmed.
+    pub lines: Vec<LineMatch>,
 }
 
 /// One matching line inside a hit.
@@ -110,6 +196,8 @@ pub struct Hit {
     /// path, role, score and true match count survive; the match lines and
     /// symbol listing do not, and the memory they held has been released.
     pub summarized: bool,
+    /// Scored spans, reported by `trace` and empty for the other verbs.
+    pub regions: Vec<Region>,
 }
 
 impl Hit {
@@ -129,6 +217,7 @@ impl Hit {
             other_symbols_omitted_count: 0,
             omitted_matches: 0,
             summarized: false,
+            regions: Vec::new(),
         }
     }
 }

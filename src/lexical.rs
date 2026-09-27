@@ -169,9 +169,17 @@ fn estimate_tokens(chars: usize) -> usize {
 
 /// What a hit's detail costs: match lines, group headers, symbol listings.
 fn hit_detail_cost(hit: &Hit) -> usize {
-    let matches: usize = hit.matches.iter().map(|line| line.line_text.len() + 18).sum();
+    let matches: usize = hit
+        .matches
+        .iter()
+        .map(|line| line.line_text.len() + 18)
+        .sum();
     let groups = hit.groups.len() * 26;
-    let symbols: usize = hit.other_symbols.iter().map(|item| item.label.len() + 26).sum();
+    let symbols: usize = hit
+        .other_symbols
+        .iter()
+        .map(|item| item.label.len() + 26)
+        .sum();
     estimate_tokens(matches + groups + symbols)
 }
 
@@ -290,6 +298,7 @@ fn scan_file(
         other_symbols_omitted_count: grouping.other_symbols_omitted_count,
         omitted_matches: 0,
         summarized: false,
+        regions: Vec::new(),
     };
     Some((stored.len(), total, hit))
 }

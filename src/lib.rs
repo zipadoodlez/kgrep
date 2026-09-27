@@ -12,6 +12,7 @@ pub mod packet;
 pub mod peak;
 pub mod rank;
 pub mod scan;
+pub mod trace;
 
 /// The version reported by `--version`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
