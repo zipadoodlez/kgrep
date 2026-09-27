@@ -120,20 +120,42 @@ reproduced agentgrep's output to within a token per task.
 | agentgrep 0.1.6 | 17/17 | 383 | 1,762 | 154,351 |
 | kgrep (path order) | 17/17 | 383 | 1,762 | 154,356 |
 
-**Now, with all four verbs**, ranked output, a streamed parallel walk, and a
-bounded packet. 25 tasks covering `grep`, `find`, `outline` and `trace`:
+**Harness-faithful, all four verbs, 25 tasks.** The reference is now
+`bench/oracle`, which links agentgrep `v0.1.6` at the pinned revision
+`b01b8040` and renders through the same call path kcode uses, including the
+`Some(200)` grep cap. This is the honest oracle, and it replaces the raw CLI
+numbers above.
 
-| tool | recall | median tok→ans | p90 | max out tok | median latency | p95 |
-|---|---|---|---|---|---|---|
-| agentgrep 0.1.6 | 25/25 | 289.5 | 974.5 | 154,351 | 18.8 ms | 51.8 ms |
-| kgrep | 25/25 | **28.8** | **464.8** | **16,061** | **13.7 ms** | **30.9 ms** |
+| tool | recall | median tok→ans | p90 | max out tok | median latency |
+|---|---|---|---|---|---|
+| agentgrep 0.1.6, harness path | 24/25 | 285.4 | 828.0 | 6,752 | 28.1 ms |
+| kgrep | **25/25** | **28.8** | **464.8** | 16,061 | 26.7 ms |
 
-So on the full surface kgrep is **10x better on median tokens to the answer, 2.1x
-better on p90, 9.6x better on the worst case, and faster**. Stage 1's exit
-criteria are met and Stage 2 is complete; details below.
+Four things, and two of them are corrections to earlier claims.
 
-Beyond recall, agreement was checked per task: `find` produced an identical top
-result to agentgrep on all ten queries sampled, and `trace` on 16 of 16.
+**1. The harness path was already bounded, and now that is measured rather than
+inferred.** agentgrep's worst case through the oracle is 6,752 tokens, not
+154,351. The earlier retraction was right, and the oracle confirms it.
+
+**2. agentgrep loses a task.** With the 200-match cap applied at render time over
+a list sorted by path, the file holding the answer for `grep swarm` is never
+rendered at all. Recall 24/25. This is the failure mode predicted in
+`docs/AGENTGREP.md`, weakness 1, now demonstrated: truncating an unranked list
+drops the answer, not merely the detail.
+
+**3. kgrep holds 25/25** because coverage is not what it cuts. The bound drops
+detail first, and names every file up to a separate cap of 500, so the answer is
+present even when its detail is not.
+
+**4. On the worst case kgrep is *larger*: 16,061 against 6,752.** That is the
+trade, made deliberately and now visible: agentgrep is cheaper because it stops
+early, and it stops early enough to lose the answer; kgrep spends more to keep it.
+The 500-file coverage cap is the knob if that trade should move, and a middle
+setting would be worth measuring.
+
+So the honest summary against the harness path is: **10x better on median tokens,
+1.8x on p90, and one more task found, at a larger worst case.** Not the 10x on
+every axis the CLI comparison suggested.
 
 Latency is per call, including process start-up, which a harness calling
 in-process does not pay. So these overstate what kcode sees and are best read as

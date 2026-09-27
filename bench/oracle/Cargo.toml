@@ -1,0 +1,16 @@
+[package]
+name = "agentgrep-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# The harness-faithful oracle: agentgrep v0.1.6, which is the version kcode
+# pins, driven through the same call path kcode uses rather than through
+# agentgrep's own CLI defaults.
+#
+# This is a measurement tool, deliberately separate from kgrep. kgrep must not
+# depend on the thing it replaces.
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde_json = "1.0"
+agentgrep = { git = "https://github.com/1jehuang/agentgrep.git", tag = "v0.1.6" }
