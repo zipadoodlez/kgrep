@@ -356,6 +356,49 @@ ways. Per task, 8 of the 12 grep tasks improve, the same 3 regress, and one is
 unchanged, so the picture holds on the wider set rather than resting on the
 original 17.
 
+**The path hypothesis, tested and rejected.** `grep-swarm-stress` looked like path
+dominance: the query is one generic word, `PATH_FULL` is 120, and every file named
+`swarm.rs` outranks the answer. Sweeping the weight refutes it.
+
+| `PATH_FULL` | median tok->ans | p90 | swarm-stress |
+|---|---|---|---|
+| 120 (current) | 28.8 | 464.8 | 14,271 |
+| 60 | 28.8 | 464.8 | 14,296 |
+| 30 | 32.2 | 1,037.2 | 14,264 |
+| 0 | 100.8 | 1,083.0 | 14,188 |
+
+Lowering the path weight never helps the task and eventually costs 3.5x the median,
+so the weight is earning its place. Removing the signal entirely moves the target by
+83 tokens out of 14,271, which is 0.6% and not a fix.
+
+While there: a single-token query that matches a path was scored twice, once as the
+whole query and once as the token, because for one token those are the same substring
+test. That double count is removed, and it is measurably neutral on this bench, so it
+is a correctness fix rather than a win.
+
+**What the task actually needs.** The answer is not a path or a declaration at all.
+`crates/jcode-app-core/src/tool/communicate.rs:874` holds the string literal that
+registers the tool, since `CommunicateTool::new().name() == "swarm"`. That is **the
+same shape as `grep-mcp-tool`**: two of the three regressions are one problem, a name
+registered as a string, which no path, symbol table or tag index can see. The third,
+`grep-config-flag`, is the ambiguity above. So the count is one ambiguity and two
+string-keyed names, and structure reaches neither.
+
+Every cheap signal was tried against this task and none of them picks that file:
+
+- path: it is 94th in path order, and the control already places it 10,812 tokens deep.
+- declared symbols: `server/swarm.rs` leads, not `communicate.rs`.
+- match count: `server/swarm.rs` has 745 against `communicate.rs`'s 123.
+- whole-word count: `server/swarm_persistence_tests.rs` has 102, `communicate.rs` 61.
+- an exactly-quoted `"swarm"` literal alone: test files lead, 9 each.
+
+`communicate.rs` is the right answer because it *registers* the tool, which is a fact
+about what the name refers to rather than about where the text sits. That is the
+resolution problem, and it is Stage 6, not a weight. **Recommendation: record this
+task as beyond the cheap tier rather than tune toward it**, and note that
+`server/swarm.rs` with 745 mentions is a defensible answer for a human too, so the
+label itself deserves a second look.
+
 **Caveat.** These weights were chosen on 17 tasks and borrowed from agentgrep's
 own finder. The signal *choice* is well supported by this set; the constants are
 not tuned, and the task set is small. A second, larger set would harden it.

@@ -228,8 +228,8 @@ median tokens-to-answer** (383 to 101) and 2.5x on p90, at no latency cost. Two
 findings: specificity is *worse than nothing* on its own, and the three per-task
 regressions were blamed on the structure sketch not parsing struct fields. **That
 blame was wrong**, refuted by measuring with ctags in hand, see `bench/README.md`.
-They are an ambiguity, a path-dominance and a no-declaration problem, and no
-structural source closes them.
+They are one name ambiguity and two string-keyed tool names, and no structural
+source reaches any of them.
 
 **1c. Stream, parallelize, bound.** Done, as one change.
 
@@ -331,8 +331,8 @@ What changes for the caller:
   scan, and it can say *what* X is, because the tag carries a kind and a scope.
 - **The ranking signal gets real labels.** Declared kind and scope, which the line
   scanner cannot see. This is *not* what closes the three regressions, contrary to
-  the earlier claim: those turned out to be ambiguity, path dominance and a
-  string-keyed name, none of which structure can reach.
+  the earlier claim: one is a name ambiguity and two are string-keyed tool names,
+  none of which structure can reach.
 - **Structure where we had none.** Any repository outside our four languages
   currently gets no structure at all, only match lines.
 

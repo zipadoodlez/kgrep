@@ -104,14 +104,22 @@ pub fn score(hit: &Hit, query: &str, tokens: &[String], ranking: Ranking) -> (i3
     let path_lower = hit.path.to_ascii_lowercase();
 
     if ranking.uses_path() && !query_lower.is_empty() {
-        if path_lower.contains(&query_lower) {
+        let full = path_lower.contains(&query_lower);
+        if full {
             score += weight::PATH_FULL;
             why.push("path contains the whole query".to_string());
         }
-        for token in tokens {
-            if path_lower.contains(token.as_str()) {
-                score += weight::PATH_TOKEN;
-                why.push(format!("path contains '{token}'"));
+        // For a single-token query the whole-query match and the token match are
+        // the same substring test, so counting both reports one fact twice. The
+        // token bonus only adds information for a multi-token query, where two
+        // tokens can match separate path segments without the query matching
+        // contiguously.
+        if !(full && tokens.len() <= 1) {
+            for token in tokens {
+                if path_lower.contains(token.as_str()) {
+                    score += weight::PATH_TOKEN;
+                    why.push(format!("path contains '{token}'"));
+                }
             }
         }
     }
