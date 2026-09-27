@@ -1,15 +1,19 @@
 //! Choosing and reading candidate files.
 //!
-//! Absorbed from agentgrep's `workspace.rs`. This is the streaming front of the
-//! funnel: it yields file entries one walk at a time and never holds file
-//! contents, so memory here is bounded by the walk, not by the corpus.
+//! Absorbed from agentgrep's `workspace.rs`, then reshaped so that the walk can
+//! be **streamed** instead of collected. Three things live here and nowhere
+//! else, because a second copy of any of them is how the two searchers drifted
+//! apart in agentgrep:
+//!
+//! * `walker_for` — the one place walker configuration is set.
+//! * `ScanConfig` — the file-type and glob filter, and what makes an entry
+//!   admissible, shared by the streaming and collected paths.
+//! * `read_text_file` — the binary and encoding rules.
 //!
 //! Non-UTF-8 file names are kept addressable. The display path of such a name
 //! gets a `#raw=<hex>` suffix over the full relative path bytes, which is
-//! injective: two distinct native names can never render the same, so a
-//! consumer that dedups on the displayed path cannot silently drop a file.
-//! This differs from agentgrep's more elaborate per-byte token scheme; the
-//! differential test compares UTF-8 corpora first.
+//! injective: two distinct native names can never render the same. This differs
+//! from agentgrep's per-byte token scheme.
 
 use ignore::WalkBuilder;
 use ignore::overrides::{Override, OverrideBuilder};
@@ -41,6 +45,101 @@ impl<'a> SearchScope<'a> {
     }
 }
 
+/// The one place walker configuration is decided.
+pub fn walker_for(scope: &SearchScope<'_>) -> WalkBuilder {
+    let mut builder = WalkBuilder::new(scope.root);
+    builder.hidden(!scope.hidden);
+    // Follow symlinks so directly-symlinked files and directories are searched.
+    builder.follow_links(scope.follow);
+    if scope.no_ignore {
+        builder.git_ignore(false);
+        builder.git_global(false);
+        builder.git_exclude(false);
+        builder.ignore(false);
+    } else {
+        // ripgrep honors `.rgignore` by default; the ignore crate only knows
+        // `.ignore` and `.gitignore`, so register it explicitly.
+        builder.add_custom_ignore_filename(".rgignore");
+    }
+    builder
+}
+
+/// The file-type and glob filter, owned so it can move into a walker closure.
+#[derive(Debug, Clone)]
+pub struct ScanConfig {
+    root: PathBuf,
+    filter: ScopeFilter,
+    follow: bool,
+    hidden: bool,
+    no_ignore: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ScopeFilter {
+    extension: Option<String>,
+    glob: Option<Override>,
+}
+
+impl ScanConfig {
+    pub fn new(scope: &SearchScope<'_>) -> Self {
+        Self {
+            root: scope.root.to_path_buf(),
+            filter: ScopeFilter {
+                extension: scope.file_type.map(normalize_file_type),
+                glob: scope.glob.and_then(|glob| build_glob(scope.root, glob)),
+            },
+            follow: scope.follow,
+            hidden: scope.hidden,
+            no_ignore: scope.no_ignore,
+        }
+    }
+
+    /// A walker for this configuration, so a closure does not have to borrow a
+    /// `SearchScope` with its lifetime.
+    pub fn walker(&self) -> WalkBuilder {
+        let scope = SearchScope {
+            root: &self.root,
+            file_type: None,
+            glob: None,
+            hidden: self.hidden,
+            no_ignore: self.no_ignore,
+            follow: self.follow,
+        };
+        walker_for(&scope)
+    }
+
+    /// Whether an entry is admissible. Mirrors the collected path exactly.
+    pub fn accepts(&self, path: &Path, is_symlink: bool) -> bool {
+        // Without --follow, ripgrep skips symlinked files entirely; the walker
+        // yields the symlink entry and `is_file()` would stat through it.
+        if !self.follow && is_symlink {
+            return false;
+        }
+        if !path.is_file() {
+            return false;
+        }
+        if let Some(expected) = self.filter.extension.as_deref()
+            && path.extension().and_then(|s| s.to_str()) != Some(expected)
+        {
+            return false;
+        }
+        if let Some(glob) = &self.filter.glob
+            && glob.matched(path, false).is_ignore()
+        {
+            return false;
+        }
+        true
+    }
+
+    pub fn entry(&self, path: &Path) -> FileEntry {
+        FileEntry {
+            path: path.to_path_buf(),
+            relative_path: normalize_display_path(&self.root, path),
+            relative_raw: relative_raw_bytes(&self.root, path),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FileEntry {
     pub path: PathBuf,
@@ -66,53 +165,19 @@ impl FileEntry {
     }
 }
 
+/// Collect every candidate. Only the outline verb needs this; the search streams.
 pub fn collect_file_entries(scope: &SearchScope<'_>) -> Vec<FileEntry> {
-    let mut builder = WalkBuilder::new(scope.root);
-    builder.hidden(!scope.hidden);
-    builder.follow_links(scope.follow);
-    if scope.no_ignore {
-        builder.git_ignore(false);
-        builder.git_global(false);
-        builder.git_exclude(false);
-        builder.ignore(false);
-    } else {
-        builder.add_custom_ignore_filename(".rgignore");
-    }
-
-    let file_type = scope.file_type.map(normalize_file_type);
-    let glob = scope.glob.and_then(|g| build_glob(scope.root, g));
+    let config = ScanConfig::new(scope);
     let mut files = Vec::new();
-
-    for entry in builder.build() {
+    for entry in walker_for(scope).build() {
         let Ok(entry) = entry else {
             continue;
         };
-        let path = entry.path();
-        if !scope.follow && entry.path_is_symlink() {
+        if !config.accepts(entry.path(), entry.path_is_symlink()) {
             continue;
         }
-        if !path.is_file() {
-            continue;
-        }
-        if let Some(expected_ext) = file_type.as_deref()
-            && path.extension().and_then(|s| s.to_str()) != Some(expected_ext)
-        {
-            continue;
-        }
-        if let Some(glob) = &glob
-            && glob.matched(path, false).is_ignore()
-        {
-            continue;
-        }
-        let relative_path = normalize_display_path(scope.root, path);
-        let relative_raw = relative_raw_bytes(scope.root, path);
-        files.push(FileEntry {
-            path: path.to_path_buf(),
-            relative_path,
-            relative_raw,
-        });
+        files.push(config.entry(entry.path()));
     }
-
     // Deterministic ordering, independent of filesystem readdir order.
     files.sort_by(|a, b| a.path.as_os_str().cmp(b.path.as_os_str()));
     files

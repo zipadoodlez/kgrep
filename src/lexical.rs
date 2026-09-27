@@ -16,9 +16,12 @@
 use crate::cli::GrepArgs;
 use crate::model::{Budget, Group, Hit, LineMatch, Packet};
 use crate::outline::{extract_file_structure, infer_role};
-use crate::scan::{FileEntry, SearchScope, collect_file_entries, read_text_file};
+use crate::scan::{FileEntry, ScanConfig, SearchScope, read_text_file};
+use ignore::WalkState;
 use regex::Regex;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// At or above this many matches in one file, per-symbol grouping is skipped:
 /// a file this dense is better described as one file-scope group than as
@@ -30,6 +33,16 @@ const DENSE_GROUPS_LIMIT: usize = 8;
 const DENSE_OTHER_SYMBOLS_LIMIT: usize = 2;
 const OTHER_SYMBOLS_LIMIT: usize = 4;
 
+/// What the workers accumulate. One lock per matching file, which is cheap
+/// beside reading and scanning it.
+#[derive(Default, Debug)]
+struct Accum {
+    hits: Vec<Hit>,
+    total_matches: usize,
+    omitted_matches: usize,
+    truncated: bool,
+}
+
 pub fn run_grep(root: &Path, args: &GrepArgs, budget: Budget) -> Result<Packet, String> {
     let matcher = Matcher::new(&args.query, args.regex)?;
     let scope = SearchScope {
@@ -40,49 +53,88 @@ pub fn run_grep(root: &Path, args: &GrepArgs, budget: Budget) -> Result<Packet, 
         no_ignore: args.scope.no_ignore,
         follow: !args.scope.no_follow,
     };
+    let config = ScanConfig::new(&scope);
 
-    let mut packet = Packet::new(args.query.clone(), args.regex, root.display().to_string());
-    let mut spent_matches = 0usize;
+    // Streamed, not collected. The walker hands entries to the workers as it
+    // finds them, so there is no file list held in memory, and the workers give
+    // us the parallelism in the same stroke. The previous design materialized
+    // every entry first, which cost 268 bytes per file and was the only term in
+    // the tool that grew with repository size.
+    let accum = Arc::new(Mutex::new(Accum::default()));
+    // Global, so the budget is exact rather than per-worker.
+    let spent = Arc::new(AtomicUsize::new(0));
 
-    for entry in collect_file_entries(&scope) {
-        let Some(text) = read_text_file(&entry.path) else {
-            continue;
-        };
+    config.walker().build_parallel().run(|| {
+        let matcher = matcher.clone();
+        let args = args.clone();
+        let config = config.clone();
+        let accum = Arc::clone(&accum);
+        let spent = Arc::clone(&spent);
 
-        let Some((stored, total_in_file, hit)) =
-            scan_file(&entry, &text, &matcher, args, budget, spent_matches)
-        else {
-            continue;
-        };
+        Box::new(move |result| {
+            let Ok(entry) = result else {
+                return WalkState::Continue;
+            };
+            if !config.accepts(entry.path(), entry.path_is_symlink()) {
+                return WalkState::Continue;
+            }
+            let file = config.entry(entry.path());
+            let Some(text) = read_text_file(&file.path) else {
+                return WalkState::Continue;
+            };
 
-        if stored > 0 {
-            spent_matches += stored;
-        }
-        packet.total_matches += total_in_file;
-        if total_in_file > stored {
-            packet.omitted_matches += total_in_file - stored;
-            packet.truncated = true;
-        }
-        packet.hits.push(hit);
-    }
+            let already = spent.load(Ordering::Relaxed);
+            let Some((stored, total_in_file, hit)) =
+                scan_file(&file, &text, &matcher, &args, budget, already)
+            else {
+                return WalkState::Continue;
+            };
+            if stored > 0 {
+                spent.fetch_add(stored, Ordering::Relaxed);
+            }
 
-    packet.total_files = packet.hits.len();
+            let mut accum = accum.lock().expect("accumulator lock");
+            accum.hits.push(hit);
+            accum.total_matches += total_in_file;
+            if total_in_file > stored {
+                accum.omitted_matches += total_in_file - stored;
+                accum.truncated = true;
+            }
+            WalkState::Continue
+        })
+    });
 
-    // Rank, then order. Without this a budget later would truncate an unranked
-    // list and keep whichever hits happen to sort first by path.
+    let Accum {
+        mut hits,
+        total_matches,
+        omitted_matches,
+        truncated,
+    } = Arc::try_unwrap(accum)
+        .expect("workers have finished")
+        .into_inner()
+        .expect("accumulator lock");
+
+    // Rank, then order. Without this a budget would truncate an unranked list
+    // and keep whichever hits happen to sort first by path.
     let ranking = crate::rank::Ranking::from_env();
+    let tokens = crate::rank::query_tokens(&args.query);
     if ranking != crate::rank::Ranking::None {
-        let tokens = crate::rank::query_tokens(&args.query);
-        for hit in &mut packet.hits {
+        for hit in &mut hits {
             let (score, why) = crate::rank::score(hit, &args.query, &tokens, ranking);
             hit.score = score;
             hit.why = why;
         }
-        packet
-            .hits
-            .sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
     }
+    // Always a total order: by rank when ranking is on, by path otherwise, so
+    // output never depends on which worker finished first.
+    hits.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
 
+    let mut packet = Packet::new(args.query.clone(), args.regex, root.display().to_string());
+    packet.total_files = hits.len();
+    packet.total_matches = total_matches;
+    packet.omitted_matches = omitted_matches;
+    packet.truncated = truncated;
+    packet.hits = hits;
     Ok(packet)
 }
 

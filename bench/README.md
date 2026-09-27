@@ -59,11 +59,22 @@ way.
 
 **Scaling, same query over synthetic repos:**
 
-| files | peak RSS |
-|---|---|
-| 100 | 4,824 KB |
-| 1,000 | 5,120 KB |
-| 5,000 | 6,108 KB |
+| files | before 1c-i | after 1c-i |
+|---|---|---|
+| 100 | 4,824 KB | 5,540 KB |
+| 1,000 | 5,120 KB | 5,636 KB |
+| 5,000 | 6,108 KB | 5,932 KB |
+
+The trade is visible and it is the one we chose: **the baseline rose by about
+700 KB and the per-file term fell by roughly 3.6x**, from 268 bytes per file to
+about 75. That is threads and their buffers bought with memory to remove the
+only structural term that grew with the repository. At 100,000 files the old
+shape cost 26.8 MB of file list; the new one costs under a tenth of that.
+
+The residual 75 bytes per file is not a held list, since nothing is collected any
+more. It is most likely allocator retention across the walk. Worth confirming at
+10x the size before treating it as noise, and worth folding into `memcheck` as
+an assertion once Stage 1c is complete.
 
 ## The finding: memory is not flat, and the cause is the file list
 
@@ -109,25 +120,26 @@ reproduced agentgrep's output to within a token per task.
 | agentgrep 0.1.6 | 17/17 | 383 | 1,762 | 154,351 |
 | kgrep (path order) | 17/17 | 383 | 1,762 | 154,356 |
 
-**Now, with ranked output as the default.** This is the current standing, and the
-first number in the project that is actually better than agentgrep's:
+**Now, with ranked output and a streamed parallel walk.** This is the current
+standing, and it is better than agentgrep on both objectives:
 
-| tool | recall | median tok→ans | p90 | median latency |
-|---|---|---|---|---|
-| agentgrep 0.1.6 | 17/17 | 383.2 | 1,762.5 | 18.6 ms |
-| kgrep (ranked) | 17/17 | **100.8** | **703.8** | 50.3 ms |
+| tool | recall | median tok→ans | p90 | median latency | p95 |
+|---|---|---|---|---|---|
+| agentgrep 0.1.6 | 17/17 | 383.2 | 1,762.5 | 19.4 ms | 32.2 ms |
+| kgrep | 17/17 | **100.8** | **703.8** | **19.1 ms** | **30.0 ms** |
 
-So: **3.8x better on median tokens to the answer, 2.5x better on p90, and 2.7x
-slower.** Tokens are the objective and latency is the other half of it, so this is
-a real win and not yet a finished one. The latency gap is the missing parallelism,
-measured at 4.2x on its own, and it is Stage 1c along with the packet bound.
+So: **3.8x better on median tokens to the answer, 2.5x better on p90, and now
+slightly faster too.** The latency regression is gone. Before the streaming
+parallel walk kgrep was 50.3 ms against agentgrep's 19.4 ms; the walker closed it
+and then some.
 
 Latency is per call, including process start-up, which a harness calling
 in-process does not pay. So these overstate what kcode sees and are best read as
 an upper bound and as a relative comparison between the two tools.
 
-The maximum output column is unchanged between the two tools because neither
-bounds its output yet. That is Stage 1c as well.
+The maximum output column is gone from this table because it is unchanged: 154k
+tokens for a generic query in both tools. Bounding it is the remaining half of
+Stage 1c and the only objective not yet met.
 
 ## The latency finding, and it is my regression
 
