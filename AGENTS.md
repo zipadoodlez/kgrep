@@ -171,7 +171,7 @@ Settled:
 - Flat memory with respect to repository size is the binding constraint and the
   differentiator.
 - No language servers or embedding models in-process.
-- agentgrep contributes code; graphify contributes ideas only.
+- agentgrep contributes code.
 - The scan is being commoditized upstream (they intend to rebuild `rg` in-process
   from the same libraries). Competing there is competing where the incumbent is
   already moving. Differentiation lives in the shaping, the memory property, and
@@ -543,9 +543,9 @@ scripts/memcheck.sh    # small by default; pass sizes to make it bigger
 Settled: Rust, one crate. One shaper with pluggable sources. Tokens and latency
 as the objective, with a declared memory ceiling as the guardrail, rather than
 flatness for its own sake. No language servers or embedding models in-process.
-graphify contributes ideas, agentgrep contributes code. No dependency swap until
-done. Structure comes from ctags declarations, so language coverage is whatever
-ctags covers rather than a list we maintain.
+agentgrep contributes code. No dependency swap until done. Structure comes from
+ctags declarations, so language coverage is whatever ctags covers rather than a
+list we maintain.
 
 Settled by decision, not by evidence:
 
@@ -572,7 +572,17 @@ resolution. The grep relevance constants, which are borrowed rather than tuned.
 
 ## Attribution
 
-Neither upstream is ours. agentgrep is MIT (`1jehuang`); graphify is Apache-2.0
-(`Safi Shamsi and the Graphify contributors`). Absorbing agentgrep's source makes
-kgrep a derivative work of it, so its notice is owed. Deferred by choice, but
-it must land before release or before kcode points at this.
+The upstream is not ours. agentgrep is MIT (`1jehuang`). Absorbing its source
+makes kgrep a derivative work of it, so its notice is owed.
+
+**Landed**, in `NOTICE` at the repo root. One wrinkle worth knowing: agentgrep
+ships no `LICENSE` file, no `authors` field, and no copyright line in any source
+file. Its licence is stated only by `license = "MIT"` in `Cargo.toml`, so the text
+is reproduced from the standard template and the holder is identified by the
+account that owns the repository. If upstream ever publishes a copyright line, it
+should replace ours.
+
+Still open, and separate: `kgrep`'s own `Cargo.toml` declares
+`license = "Apache-2.0"` but the repository ships no `LICENSE` file either, so the
+crate is not yet properly licensed on its own account. That is a choice to make
+before release, not a blocker for the swap.

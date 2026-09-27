@@ -226,7 +226,7 @@ buffers.
    tree-sitter queries specifically.** Aider uses `tags.scm` query files per
    language to extract definitions and references, then PageRank to rank, then a
    token budget. That is the cheap interpretation layer we proposed instead of
-   porting graphify's resolution engine. It is a small, shipped Python
+   building a resolution engine of our own. It is a small, shipped Python
    implementation doing exactly what we want.
 
 6. **LSP is the big unexploited lever.** Only Serena and VS Code's "usages"

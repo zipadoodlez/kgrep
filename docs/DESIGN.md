@@ -43,8 +43,8 @@ Two triggers, because neither is sufficient alone.
 
 **Eager: a git hook.** `post-commit`, `post-checkout`, `post-merge`, and
 `post-rewrite` run a silent incremental update. This is the cheap, timely path.
-Keep the hook tiny, and make it opt-in. Installers and hook managers were husk
-in graphify; the hook itself is worth keeping, the machinery around it is not.
+Keep the hook tiny, and make it opt-in. Installers and hook managers are husk;
+the hook itself is worth keeping, the machinery around it is not.
 
 **Lazy: a staleness check on every search.** Hooks miss work that is never
 committed, which is most work. So each search cheaply asks "has anything changed
