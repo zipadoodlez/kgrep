@@ -223,13 +223,13 @@ memory is **not flat**: the file walk materializes the whole file list at roughl
 **268 bytes per file**, which is the one term that scales with the repository.
 Provisional ceiling: **32 MB peak for any repository up to 100,000 files**.
 
-**1b. Decide the ranking signal.** This is the one genuinely open design
-question and it blocks the rest. "Rank before spending" is meaningless without a
-score, and grep has none today. Run a small experiment: score hits by a few cheap
-signals (does the match land in a symbol's *label*; how many matches the file has,
-as a proxy for specificity; file role) and measure whether tokens-to-answer
-improves on the 17 tasks. A null result is a real outcome and changes the design,
-for example bounding by file count instead of rank.
+**1b. Decide the ranking signal.** Done, see `bench/README.md`. Four cheap signals
+(path, symbol labels, specificity, role) were measured separately and together.
+Together they are **3.8x better on median tokens-to-answer** (383 to 101) and 2.5x
+on p90, at no latency cost, so they are now the default. Two findings worth
+keeping: specificity is *worse than nothing* on its own, and the three per-task
+regressions all trace to the structure sketch not parsing struct fields, so they
+should close when Stage 4 lands rather than being fixed by tuning weights.
 
 **1c. Stream the walk, in parallel, with a bounded packet.** Three fixes that are
 one change, which is why they are grouped:

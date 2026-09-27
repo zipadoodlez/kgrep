@@ -67,6 +67,22 @@ pub fn run_grep(root: &Path, args: &GrepArgs, budget: Budget) -> Result<Packet, 
     }
 
     packet.total_files = packet.hits.len();
+
+    // Rank, then order. Without this a budget later would truncate an unranked
+    // list and keep whichever hits happen to sort first by path.
+    let ranking = crate::rank::Ranking::from_env();
+    if ranking != crate::rank::Ranking::None {
+        let tokens = crate::rank::query_tokens(&args.query);
+        for hit in &mut packet.hits {
+            let (score, why) = crate::rank::score(hit, &args.query, &tokens, ranking);
+            hit.score = score;
+            hit.why = why;
+        }
+        packet
+            .hits
+            .sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
+    }
+
     Ok(packet)
 }
 

@@ -9,6 +9,7 @@ pub mod model;
 pub mod outline;
 pub mod packet;
 pub mod peak;
+pub mod rank;
 pub mod scan;
 
 /// The version reported by `--version`.

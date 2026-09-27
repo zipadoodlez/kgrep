@@ -143,6 +143,61 @@ packet: parallel workers need either per-worker bounded heaps merged at the end,
 or a cheap two-pass over a ranked shortlist. Bounding and parallelism have to be
 designed together.
 
+## The ranking experiment, 2026-09-27
+
+"Rank before spending" needs a score, and grep had none. Six variants were
+measured against the same 17 tasks, with recall unchanged at 17/17 throughout:
+
+| signals | median tok→ans | p90 |
+|---|---|---|
+| none (control, path order) | 383.2 | 1,762.5 |
+| path | 286.5 | 974.5 |
+| symbol | 234.2 | 1,893.0 |
+| specificity | 454.8 | 2,495.8 |
+| role | 322.0 | 1,647.5 |
+| **all** | **100.8** | **703.8** |
+
+`all` is **3.8x better on the median and 2.5x better on p90**, at no measurable
+latency cost (52.5 ms versus 52.7 ms). Adopted as the default; `GRAPHGREP_RANK=none`
+restores path order as the control.
+
+**A signal that sounds sensible hurts on its own.** Specificity, meaning "prefer
+files with fewer matches", is *worse than doing nothing*: 454.8 against 383.2, and
+p90 almost 42% worse. It only helps in combination. This is why the variants were
+measured separately instead of the whole set being adopted on intuition.
+
+**Per task, 9 improved sharply, 4 unchanged, 3 got worse.** The unchanged four are
+the outline tasks, where ranking does not apply. The improvements are large
+(974.5 to 20.8; 1,762.5 to 25.8; 828.0 to 27.5), so the median moves for real.
+
+**The three regressions share one root cause, and it is not the ranking.** Take
+`grep-config-flag`, where the answer lives in
+`crates/jcode-config-types/src/display.rs`. In that file the name appears only as a
+**struct field**:
+
+```rust
+pub show_agentgrep_output: bool,
+```
+
+The structure sketch does not parse fields, so no symbol matches there. Meanwhile
+`crates/jcode-base/src/config/config_file.rs` declares:
+
+```rust
+pub fn set_show_agentgrep_output(show: bool) -> anyhow::Result<()> {
+```
+
+a real function whose label contains the query, so the symbol signal lifts the
+wrong file. The same applies to `grep-mcp-tool`: `mcp_call` is a string-keyed tool
+name, not a declared symbol, and again the signal boosts a consumer.
+
+So the ranking is doing its job on incomplete structure data. **The fix is Stage 4,
+not a ranking tweak**: with a real parse, fields and string-keyed names become
+findable, and the regressions should close themselves. Worth re-measuring then.
+
+**Caveat.** These weights were chosen on 17 tasks and borrowed from agentgrep's
+own finder. The signal *choice* is well supported by this set; the constants are
+not tuned, and the task set is small. A second, larger set would harden it.
+
 ## What this tells us
 
 > **Correction, same day. The max-output claim below is wrong for the harness
