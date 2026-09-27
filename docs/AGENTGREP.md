@@ -90,8 +90,10 @@ It covers Rust, TypeScript/JavaScript, Python, and Markdown. Everything else fal
 to a generic scanner that finds only ALL-CAPS section lines, so for most languages
 the structure information is close to empty.
 
-**Fix:** a real parse, driven by tree-sitter queries, with the line-based version
-kept as the fallback for languages with no grammar.
+**Fix:** consume ctags as a declaration index, with the line-based scanner kept
+as the fallback where no index exists. It emits the fields and methods the
+line-scanner never sees, and it covers roughly a hundred languages, so the
+coverage hole closes at index time rather than by compiling grammars in.
 
 ### 8. No symbol resolution
 

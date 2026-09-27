@@ -65,9 +65,9 @@ Not a rebuild of changed files. Three steps:
    files that did not change. This requires a reverse index: who points at this
    node. Without it, incremental updates rot silently.
 3. **Let the cheap text sweep verify.** A plain scan over the changed files
-   detects claims the parse got wrong or relations it never saw, including the
-   ones wired up by a name in quotes. The always-fresh half keeps the
-   sometimes-stale half honest.
+   detects claims the structural source got wrong or relations it never saw,
+   including the ones wired up by a name in quotes. The always-fresh half keeps
+   the sometimes-stale half honest.
 
 ### Budgets and failure
 
@@ -104,7 +104,7 @@ structural: how connected a thing is, which cluster you are in, which of the
 twelve things named `render` you actually mean. This is the best available
 answer to the main complaint about plain search, which is noise.
 
-**The search fills the map's holes.** A map built from grammar is blind to
+**The search fills the map's holes.** A map built from declarations is blind to
 relations wired by a name in quotes: command tables, plugin registries, config
 keys, string dispatch. A plain scan finds them and draws them in, marked as
 lower confidence. Without this the map has holes exactly where the code is most
@@ -166,16 +166,21 @@ independently useful and must not raise peak memory.
    file instead of several, no whole-file lowercased copy, no whole-file line
    vector, and a bounded top-K instead of collecting every match before sorting.
    This is a free win, and it is the first proof of the memory thesis.
-3. **A real tree-sitter outline**, replacing the regex line-scanner, driven by a
-   small query file per language. Bounded per file, tree dropped immediately.
-   This is where nesting and zoom arrive, and it costs no resident memory.
-4. **A tag index** for go-to-definition: one mmapped file, name to location.
-   Nearly free, and it is ctags without a process.
-5. **An mmapped sparse n-gram index** for lexical scaling on large repos.
+3. **A ctags tag index** for go-to-definition and real declaration labels: one
+   sorted file, name to location, kind and scope, mmapped and never resident.
+   It replaces the line-scanner's symbol view where it exists, covers about a
+   hundred languages instead of four, and costs no binary size. It is the whole
+   of our structure plan, because it also brings the fields and methods the
+   line-scanner misses, which is what the ranking regressions needed.
+4. **An mmapped sparse n-gram index** for lexical scaling on large repos.
    Cursor's published design, adopted for memory rather than latency. This is the
    "best in the world" claim.
-6. **The graph, last**, as an mmapped artifact queried on demand, answering only
+5. **The graph, last**, as an mmapped artifact queried on demand, answering only
    the architectural questions: what is central, what clusters, how things link.
+
+Cut on purpose: an in-process parse for real ranges. ctags gives the declarations
+and none of the extents, and the only things extents bought were trace region
+bodies and symbol-scoped edits, neither of which has a measured need.
 
 Explicitly not built: language servers in-process, embedding models, vector
 stores, and any resident structure proportional to repository size.

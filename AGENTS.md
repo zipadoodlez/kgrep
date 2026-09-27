@@ -30,8 +30,7 @@ be allowed in.
 |---|---|---|---|
 | Lexical scan | exact text and regex | none, always available | working |
 | Structure sketch | symbols, ranges | bounded per file | working, line-based |
-| tree-sitter / ast-grep | real nesting and patterns | bounded per file | not started |
-| Tag index | where is X defined | one mmapped file | not started |
+| Tag index (ctags) | where is X defined, and what kind of thing it is | one mmapped file, no binary growth | not started, Stage 4 |
 | mmapped n-gram index | fast regex on huge repos | mmapped, evictable | not started |
 | Harness state | what the agent read, what changed | nearly free | partial, in agentgrep |
 | Resolution (ours, approximate) | who might use this | bounded index | not started |
@@ -174,9 +173,9 @@ Open, and genuinely unknown:
 - **What is the right default token budget?** Unknown until measured.
 - **How should the tail be ordered?** If we name every matching file, in what
   order, and does that order matter to a model?
-- **Does structural ranking actually improve answers?** Testable once the AST
-  source exists. Currently an assumption, and it is the assumption Stage 4 rests
-  on.
+- **Does structural ranking actually improve answers?** Testable once the
+  declaration source exists. Currently an assumption, and it is the assumption
+  Stage 4 rests on.
 - **How the name ages.** `kgrep` is anchored to kcode, which is meaningful only
   while kcode is the sole consumer. That is a deliberate trade, not an oversight.
 - **Graph freshness policy.** How stale is too stale, if the artifact is built.
@@ -309,56 +308,63 @@ so search-then-read round-trips.
 - **Exit met:** parity on the edge corpus, deliberate differences written down,
   and the benchmark measuring the harness path.
 
-### Stage 4 — real structure, and the grokking (next)
+### Stage 4 — declarations, from ctags (next)
 
-Adopt `ast-grep-core` and `ast-grep-language` (skip `ast-grep-config`), with a
-small per-language kind table. Keep the line-based scanner as the fallback for
-languages without a grammar.
+Consume `universal-ctags` as a **tag index**: one sorted file, name to file, line,
+kind and scope, read mmapped and never resident. ctags runs at index time only.
+Nothing new is compiled in, so the binary does not grow, and the line-based
+scanner stays as the fallback for when the index is absent or stale.
 
-This is where the "grokking" actually lives, and it is a **signal, not a separate
-map**: which symbol a hit lives in, how deep it sits, what it contains, what it
-imports. Those change the answers to ordinary questions, which is where the value
-is. Containment is free from the parse and imports are precise, so the high-value
-version is also the cheap one, and no cross-file resolution is needed.
+Chosen over an in-process parse because it gets most of the benefit at none of
+the cost. Verified kinds include `m field`, `P method` and `e enumerator`
+alongside structs and functions, and it covers roughly a hundred languages
+against our four, which is the difference between finding nothing and finding
+declarations. The one thing it does not give is end lines: `rust.c`, `go.c`,
+`python.c` and `typescript.c` never call `setTagEndLine`, so there are no real
+extents. An in-process parse for ranges is **cut**, not deferred.
 
-It is also the only candidate that fixes the three measured ranking regressions,
-which trace to struct fields not being visible to the line scanner. That is the
-one benefit we can measure today, and it is what has to justify the stage.
+What changes for the caller:
 
-Two things to get right here because they are cheap now and expensive later:
+- **A declaration index.** "Where is X defined" becomes a lookup rather than a
+  scan, and it can say *what* X is, because the tag carries a kind and a scope.
+- **The ranking signal gets real labels.** The three measured regressions trace
+  to struct fields being invisible to the line scanner, and ctags emits them.
+- **Structure where we had none.** Any repository outside our four languages
+  currently gets no structure at all, only match lines.
 
-- **Stable symbol identity** and a name index, so a symbol can be addressed by
-  something other than a line number.
-- **Real ranges**, replacing the current approximation where an item ends on the
-  line before the next item begins.
+This is still a **signal, not a separate map**: which symbol a hit lives in, what
+kind it is, what encloses it. Those change the answers to ordinary questions, and
+no cross-file resolution is needed.
 
-- **Exit:** the three ranking regressions close; nested structure available;
-  outline more accurate; tokens and latency no worse.
+Three things to get right:
 
-#### Footnote: symbol-scoped edits come free, and are not a stage
+- **The index must stay optional.** Ranking is index-independent today. Without
+  the index we are exactly where we are now, and that is the floor; the index is
+  the ceiling. Degrading has to be clean and silent-free.
+- **Freshness is a real failure mode.** A stale tag is a wrong answer, silently.
+  The index needs a cheap validity check, and staleness has to be visible rather
+  than assumed.
+- **The kind table is ours.** ctags kinds are per-language and inconsistent, so
+  mapping tag kinds onto our symbol model is code we own and test.
 
-If ranges become real, a fourth way to address an edit becomes available: name a
-symbol instead of quoting its text or giving line numbers, so the tool resolves
-the range and replaces the body, inserts around it, or deletes it.
+- **Exit:** the three regressions close and recall holds; a definition query is
+  answered from the index without a scan; peak RSS stays under the ceiling with no
+  new resident structure proportional to repository size.
 
-That is worth having because `edit` requires the caller to echo the text being
-replaced, and `patch` costs *more*, since a unified diff contains the removed
-lines. But it is **an optimization of a working path, not a missing capability**:
-the edit is achievable today, only more expensively. For a whole-function
-rewrite of N lines the saving is roughly half of that one call's output, which is
-worth something and is nowhere near an order of magnitude. It has not been
-measured, and the benchmark has no edit-shaped tasks.
+#### Footnote: edits are not ours to improve
 
-There is also an 80% version needing no parse at all: let `edit` accept a line
-range as an alternative anchor. The caller already has line numbers from `read`
-and `outline`. What symbol addressing adds on top is surviving drift, because it
-re-resolves by name, and expressing intent, because "replace `parse_config`" says
-what is meant while "replace lines 40 to 120" is a promise about layout.
+Symbol-scoped edits were going to arrive with real ranges. Ranges are not coming,
+because ctags does not emit end lines, so that plan is dead rather than deferred.
 
-So this is not a stage. It is a bonus that arrives with Stage 4, and if Stage 4
-does not happen we lose an unmeasured optimization rather than a capability. If
-it does happen, the edit applies directly and shows a diff, exactly as `edit` does
-today, reusing the checkpoint path rather than inventing a second one.
+What survives is the cheaper version, which needs no ranges at all: let the
+harness's `edit` take a line range as an alternative anchor to `old_string`. The
+caller already has line numbers from `read` and `outline`, so this removes the
+need to echo the text being replaced. That is worth having, because `edit` must
+echo it while `patch` costs *more*, since a unified diff contains the removed
+lines. But it is an optimization of a working path rather than a missing
+capability, it is unmeasured, and it belongs to the edit tool rather than to us.
+What symbol addressing added beyond a line range is surviving drift and
+expressing intent. Both are real, and neither is worth a parse on this evidence.
 
 ### Stage 5 — harness state as a source
 
@@ -422,7 +428,12 @@ Language servers in-process, a language-server integration of our own, depending
 on or recommending a third-party wrapper such as Serena, embedding models, vector
 stores, installers, hooks managers, editors, MCP/HTTP servers of our own, watch
 mode, HTML/canvas/SVG/wiki exporters, media or document ingest, cross-file
-rewriting, and any resident structure proportional to repository size.
+rewriting, an in-process parse for real ranges, and any resident structure
+proportional to repository size.
+
+The parse is cut rather than deferred: it buys end lines we have no measured use
+for, and everything else it offers, ctags offers cheaper. If a real range need
+appears with a number attached, that is the moment to revisit it.
 
 Note on MCP: kcode already supports arbitrary MCP servers as a client, so a user
 who wants a language server can configure one without anything from us. That is a
@@ -507,7 +518,8 @@ Settled: Rust, one crate. One shaper with pluggable sources. Tokens and latency
 as the objective, with a declared memory ceiling as the guardrail, rather than
 flatness for its own sake. No language servers or embedding models in-process.
 graphify contributes ideas, agentgrep contributes code. No dependency swap until
-done. Initial extraction languages: Rust, Python, TypeScript/JavaScript, Go.
+done. Structure comes from ctags declarations, so language coverage is whatever
+ctags covers rather than a list we maintain.
 
 Settled by decision, not by evidence:
 
