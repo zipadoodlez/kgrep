@@ -68,7 +68,8 @@ four parallel implementations. One way in, one way out, however many front doors
 
 - **agentgrep is absorbed (code).** It is already Rust, so its source is taken,
   reshaped onto the shaper, and its memory spikes removed. Its MIT notice follows
-  it.
+  it. `docs/AGENTGREP.md` records its known weaknesses with evidence, since they
+  become ours unless deliberately fixed.
 - **graphify is ideas only (no code).** We take the concepts: edge confidence
   (`EXTRACTED`/`INFERRED`/`AMBIGUOUS`), god nodes, communities. We write our own
   extraction, driven by **tree-sitter queries**, one small file per language.
