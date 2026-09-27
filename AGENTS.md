@@ -22,6 +22,16 @@ The end goal is to replace the `agentgrep` dependency inside **kcode** with
 graphgrep. Compatibility with that consumer is a hard constraint, not an
 aspiration.
 
+### How the two halves arrive
+
+Asymmetric effort, and it matters:
+
+- **agentgrep is already Rust.** It is not ported, it is *absorbed*: vendor its
+  `src/` as the lexical core and reshape it onto the core representation below.
+  It compiles today and has a real consumer, so this half is low risk.
+- **graphify is Python.** Its grain is *ported* to Rust. This is the only real
+  Rust-writing work, and it is small if scope is fixed before the port starts.
+
 ## Philosophy
 
 Two skills govern all work here. Both are always on.
@@ -122,6 +132,13 @@ graphgrep is not done until that consumer builds and its tests pass against it.
 
 The CLI surface (`grep`, `find`, `outline`, `trace`) is the same contract for
 humans and scripts. Keep it exact until a change is agreed on both sides.
+
+**Clean core, stable façade.** Inside, there is one shape: a `Query` in, a
+`Packet` out. The four `run_*` entry points are thin constructors over it, not
+parallel implementations. This keeps the core small (`grep`/`find`/`outline`/
+`trace` stop being four ways to do one thing) while the old names survive as a
+compatibility façade so kcode swaps by rename, not rewrite. When a fourth
+caller appears, it grows no fourth path.
 
 ## Layout
 
