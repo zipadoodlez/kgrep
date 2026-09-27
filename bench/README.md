@@ -310,29 +310,51 @@ measured separately instead of the whole set being adopted on intuition.
 the outline tasks, where ranking does not apply. The improvements are large
 (974.5 to 20.8; 1,762.5 to 25.8; 828.0 to 27.5), so the median moves for real.
 
-**The three regressions share one root cause, and it is not the ranking.** Take
-`grep-config-flag`, where the answer lives in
-`crates/jcode-config-types/src/display.rs`. In that file the name appears only as a
-**struct field**:
+**A retracted claim: the three regressions were blamed on missing struct fields,
+and that was wrong.** The earlier version of this section said they share one root
+cause, that the line scanner cannot see struct fields, and that Stage 4 would close
+them. Measured with ctags in hand, that is not what is happening. They are three
+separate problems, and no structural source reaches any of them.
 
-```rust
-pub show_agentgrep_output: bool,
+The instrument: `ctags` 6.2.1 over kcode, `--fields=+nKSZ --extras=+q`, which emits
+**41,249 tags in 7.5 MB in 6.5 s**, and it does emit fields exactly as hoped:
+
+```
+show_agentgrep_output  crates/jcode-config-types/src/display.rs  field  line:64  scope:struct:DisplayConfig
 ```
 
-The structure sketch does not parse fields, so no symbol matches there. Meanwhile
-`crates/jcode-base/src/config/config_file.rs` declares:
+So the mechanism the claim rested on is real. It just does not decide these tasks.
 
-```rust
-pub fn set_show_agentgrep_output(show: bool) -> anyhow::Result<()> {
-```
+- **`grep-config-flag` is a name ambiguity, not an invisible field.**
+  `show_agentgrep_output` is declared as a field in **three** files, and
+  `crates/jcode-tui-messages/src/cache.rs` is the one that wins, with 3 matches to
+  `display.rs`'s 2. Both are inside the maximally-specific band, so they tie on
+  specificity, and both score zero on symbols today. ctags gives *both* the exact
+  tag, and gives cache.rs two of them against display.rs's one, so it would widen
+  the gap rather than close it. Telling them apart means knowing which definition
+  the query *means*, which is resolution and centrality, not structure.
+- **`grep-swarm-stress` is path dominance.** The query is one generic word, and
+  `PATH_FULL` is worth 120, so every file literally named `swarm.rs` outranks the
+  answer in `communicate.rs`, whose path says nothing. ctags cannot touch this, and
+  it would add exact `swarm` tags in five more files. This is a weighting question
+  and it is measurable without ctags at all.
+- **`grep-mcp-tool` has no declaration to find.** No ctags tag named `mcp_call`
+  exists anywhere in kcode. It is a string-keyed tool name in a table, and the file
+  that ranks first is a consumer. There is no structure for a structural source to
+  return.
 
-a real function whose label contains the query, so the symbol signal lifts the
-wrong file. The same applies to `grep-mcp-tool`: `mcp_call` is a string-keyed tool
-name, not a declared symbol, and again the signal boosts a consumer.
+So "the ranking is doing its job on incomplete structure data" was generous to the
+ranking and unkind to the structure. Two of the three are questions structure
+cannot answer, and the third is a weight we chose. The honest candidates are a
+ranking change for path dominance, and reporting ambiguity rather than pretending
+to resolve it.
 
-So the ranking is doing its job on incomplete structure data. **The fix is Stage 4,
-not a ranking tweak**: with a real parse, fields and string-keyed names become
-findable, and the regressions should close themselves. Worth re-measuring then.
+**Re-run on the current 25-task bench** (`bench/rank-all.json` and
+`bench/rank-none.json`, written by the run above): median tokens-to-answer **28.8**
+with ranking against **286.5** without, p90 464.8 against 974.5, recall 25/25 both
+ways. Per task, 8 of the 12 grep tasks improve, the same 3 regress, and one is
+unchanged, so the picture holds on the wider set rather than resting on the
+original 17.
 
 **Caveat.** These weights were chosen on 17 tasks and borrowed from agentgrep's
 own finder. The signal *choice* is well supported by this set; the constants are

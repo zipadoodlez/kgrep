@@ -226,8 +226,10 @@ to 100,000 files.
 **1b. The ranking signal.** Done. Four cheap signals together are **3.8x better on
 median tokens-to-answer** (383 to 101) and 2.5x on p90, at no latency cost. Two
 findings: specificity is *worse than nothing* on its own, and the three per-task
-regressions all trace to the structure sketch not parsing struct fields, so they
-should close when Stage 4 lands.
+regressions were blamed on the structure sketch not parsing struct fields. **That
+blame was wrong**, refuted by measuring with ctags in hand, see `bench/README.md`.
+They are an ambiguity, a path-dominance and a no-declaration problem, and no
+structural source closes them.
 
 **1c. Stream, parallelize, bound.** Done, as one change.
 
@@ -327,8 +329,10 @@ What changes for the caller:
 
 - **A declaration index.** "Where is X defined" becomes a lookup rather than a
   scan, and it can say *what* X is, because the tag carries a kind and a scope.
-- **The ranking signal gets real labels.** The three measured regressions trace
-  to struct fields being invisible to the line scanner, and ctags emits them.
+- **The ranking signal gets real labels.** Declared kind and scope, which the line
+  scanner cannot see. This is *not* what closes the three regressions, contrary to
+  the earlier claim: those turned out to be ambiguity, path dominance and a
+  string-keyed name, none of which structure can reach.
 - **Structure where we had none.** Any repository outside our four languages
   currently gets no structure at all, only match lines.
 
@@ -347,9 +351,11 @@ Three things to get right:
 - **The kind table is ours.** ctags kinds are per-language and inconsistent, so
   mapping tag kinds onto our symbol model is code we own and test.
 
-- **Exit:** the three regressions close and recall holds; a definition query is
-  answered from the index without a scan; peak RSS stays under the ceiling with no
-  new resident structure proportional to repository size.
+- **Exit:** a definition query is answered from the index without a scan; a
+  repository outside our four languages gets real declarations where it currently
+  gets only match lines; recall holds; peak RSS stays under the ceiling with no new
+  resident structure proportional to repository size. Explicitly **not** part of
+  this exit: the three ranking regressions, which are a different problem.
 
 #### Footnote: edits are not ours to improve
 
