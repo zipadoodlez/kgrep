@@ -166,12 +166,12 @@ independently useful and must not raise peak memory.
    file instead of several, no whole-file lowercased copy, no whole-file line
    vector, and a bounded top-K instead of collecting every match before sorting.
    This is a free win, and it is the first proof of the memory thesis.
-3. **A ctags tag index** for go-to-definition and real declaration labels: one
-   sorted file, name to location, kind and scope, mmapped and never resident.
-   It replaces the line-scanner's symbol view where it exists, covers about a
-   hundred languages instead of four, and costs no binary size. It is the whole
-   of our structure plan, because it also brings the fields and methods the
-   line-scanner misses, which is what the ranking regressions needed.
+3. **`ctags` for coverage**, run per file and only for the languages the line
+   scanner cannot parse. Measured at 14.5 ms for one file against 3.2 ms for the
+   scanner, and 2.9 s for a whole-repo index, which is why there is no index: the
+   question is per file, so the index, the artifact and the freshness problem all
+   disappear. It is the difference between an outline and nothing on a Go, Ruby or
+   Java repository.
 4. **An mmapped sparse n-gram index** for lexical scaling on large repos.
    Cursor's published design, adopted for memory rather than latency. This is the
    "best in the world" claim.

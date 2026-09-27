@@ -1,19 +1,31 @@
 //! File structure: what symbols a file declares, and where.
 //!
-//! Absorbed from agentgrep's `structure.rs`. The extraction is line-based and
-//! approximate on purpose: it needs no parser and no resident state, so it
-//! costs nothing in memory and works on any file. A tree-sitter driven version
-//! replaces the extraction internals later without changing this interface.
+//! Two backends, chosen by who is asking.
+//!
+//! `outline` asks about **one** file. For the four languages the scanner knows,
+//! the scanner is used, because it is more precise and costs no subprocess. For
+//! anything else, `outline` may pay about 15 ms to run `ctags` and get real
+//! reach: roughly a hundred languages instead of four. That is
+//! `extract_with_ctags`, and it is what turns a Go, Ruby or Java repository from
+//! an outline of nothing into an outline.
+//!
+//! `grep`, `find` and `trace` sweep a **repository**, where the same 15 ms per
+//! file would turn a 30 ms search into half a minute. They stay on
+//! `extract_file_structure`, the in-process line-based scanner, which is also
+//! the fallback when `ctags` is not installed.
 //!
 //! One caveat that callers must not forget: item end lines are **approximate**.
 //! An item ends on the line before the next item begins, not at a real closing
 //! brace. Grouping matches under symbols is fine with that. Anything that needs
-//! true extents must wait for the parser-backed version.
+//! true extents must wait for a parser-backed version, and `ctags` does not
+//! provide them either, since its Rust, Go, Python and TypeScript parsers never
+//! emit an end line.
 
 use crate::cli::OutlineArgs;
 use crate::scan::{SearchScope, read_text_file};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct StructureItem {
@@ -22,6 +34,11 @@ pub struct StructureItem {
     pub start_line: usize,
     pub end_line: usize,
     pub line_count: usize,
+    /// The enclosing item, as `kind:name`, when the extractor knows it. `ctags`
+    /// reports this and the line-based scanner does not, so it is `None` on the
+    /// scanner path and the ranges then fall back to the old approximation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,22 +58,27 @@ pub struct OutlineResult {
     pub omitted_count: usize,
 }
 
+/// The languages the in-process scanner actually parses. Everything else falls
+/// to `ctags`, which is the whole point: without it a Go or Ruby repository gets
+/// an outline of nothing.
+fn scanner_knows(language: &str) -> bool {
+    matches!(
+        language,
+        "rust" | "typescript" | "javascript" | "python" | "markdown"
+    )
+}
+
 pub fn run_outline(root: &Path, args: &OutlineArgs) -> Result<OutlineResult, String> {
     let path = resolve_outline_path(root, &args.file);
     let Some(text) = read_text_file(&path) else {
         return Err(file_not_found_error(root, &args.file, &path));
     };
     let relative = relative_display(root, &path);
-    let structure = extract_file_structure(&path, &relative, &text);
+    let structure = extract_outline_structure(&path, &relative, &text);
     let total_lines = text.lines().count();
 
     let items = match args.max_items {
-        Some(max) => structure
-            .items
-            .iter()
-            .take(max)
-            .cloned()
-            .collect::<Vec<_>>(),
+        Some(max) => structure.items.iter().take(max).cloned().collect(),
         None => structure.items.clone(),
     };
     let omitted_count = structure.items.len().saturating_sub(items.len());
@@ -203,6 +225,127 @@ fn suggest_similar_files(root: &Path, requested: &str) -> Vec<String> {
     hits
 }
 
+/// Extract structure for a single file.
+///
+/// The scanner wins where it applies, because it is more precise and costs no
+/// subprocess. `ctags` is the coverage backend for the languages it does not
+/// know, so a Go, Ruby or Java repository gets real items where it used to get
+/// only match lines.
+fn extract_outline_structure(path: &Path, relative_path: &str, text: &str) -> FileStructure {
+    let language = detect_language(path);
+    let from_ctags = if scanner_knows(language) {
+        None
+    } else {
+        extract_with_ctags(path)
+    };
+    if let Some(mut items) = from_ctags {
+        finalize_ranges(text, &mut items);
+        return FileStructure {
+            language: language.to_string(),
+            role: infer_role(relative_path),
+            items,
+        };
+    }
+    extract_file_structure(path, relative_path, text)
+}
+
+/// Run `ctags` on one file and read its tags.
+///
+/// Returns `None` when ctags is missing, refuses the file, or has nothing to
+/// say, so the caller falls back to the scanner rather than reporting an empty
+/// file. There is no probe: a missing binary fails to spawn, which is the same
+/// fallback as one that refuses the file, and testing by doing keeps this to a
+/// single exec. `KGREP_CTAGS=off` forces the fallback, which is the control for
+/// measuring what ctags actually buys.
+fn extract_with_ctags(path: &Path) -> Option<Vec<StructureItem>> {
+    if std::env::var("KGREP_CTAGS").as_deref() == Ok("off") {
+        return None;
+    }
+    let output = Command::new("ctags")
+        .args(["-f", "-", "--fields=+nKZ", "--sort=no"])
+        .arg(path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut items = parse_ctags_tags(&text);
+    if items.is_empty() {
+        return None;
+    }
+    items.sort_by_key(|item| item.start_line);
+    Some(items)
+}
+
+/// Parse `ctags` tag lines: name, path, pattern, kind, then `key:value` fields.
+///
+/// The `!_TAG_` header lines are metadata and are skipped. A tag without a line
+/// number is dropped, since a symbol we cannot place is not worth reporting.
+fn parse_ctags_tags(text: &str) -> Vec<StructureItem> {
+    let mut items = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() || line.starts_with("!_TAG_") {
+            continue;
+        }
+        // The pattern field is not safe to index positionally: it can contain a
+        // literal tab, because some languages indent with tabs, which is exactly
+        // what Go does. So the kind is the field after the one that closes the
+        // pattern with `;"`.
+        let fields: Vec<&str> = line.split('\t').collect();
+        let Some(&name) = fields.first() else {
+            continue;
+        };
+        let Some(close) = fields.iter().position(|field| field.ends_with(";\"")) else {
+            continue;
+        };
+        let Some(raw_kind) = fields.get(close + 1) else {
+            continue;
+        };
+        // A `package` declaration is file-level metadata rather than structure:
+        // it names the file and encloses everything in it, so keeping it would
+        // give one item that swallows the whole outline.
+        if *raw_kind == "package" {
+            continue;
+        }
+        let mut line_number = 0usize;
+        let mut scope = None;
+        for field in fields.iter().skip(close + 2) {
+            if let Some(value) = field.strip_prefix("line:") {
+                line_number = value.parse().unwrap_or(0);
+            } else if let Some(value) = field.strip_prefix("scope:") {
+                // `scope:<kind>:<name>`, where the name can itself contain
+                // colons, so only the kind is split off.
+                if let Some((kind, name)) = value.split_once(':') {
+                    scope = Some(format!("{}:{name}", normalize_ctags_kind(kind)));
+                }
+            }
+        }
+        if name.is_empty() || line_number == 0 {
+            continue;
+        }
+        items.push(StructureItem {
+            kind: normalize_ctags_kind(raw_kind).to_string(),
+            label: name.to_string(),
+            start_line: line_number,
+            end_line: line_number,
+            line_count: 1,
+            scope,
+        });
+    }
+    items
+}
+
+/// `ctags` kind names are per-language, so only the collisions with our own
+/// vocabulary are mapped. Printing the real kind beats collapsing everything to
+/// "symbol", because the kind is most of what an outline is for.
+fn normalize_ctags_kind(raw: &str) -> &str {
+    match raw {
+        "implementation" => "impl",
+        other => other,
+    }
+}
+
 pub fn extract_file_structure(path: &Path, relative_path: &str, text: &str) -> FileStructure {
     let language = detect_language(path);
     let mut items = match language {
@@ -233,6 +376,22 @@ fn detect_language(path: &Path) -> &'static str {
         "md" => "markdown",
         "json" => "json",
         "yaml" | "yml" => "yaml",
+        // Only used to label a file, so that a Go or Ruby hit reports its real
+        // language instead of "text". The scanner still parses only the four
+        // above; anything here that it does not know reaches `ctags`.
+        "go" => "go",
+        "rb" => "ruby",
+        "java" => "java",
+        "c" | "h" => "c",
+        "cc" | "cpp" | "cxx" | "hpp" => "cpp",
+        "cs" => "csharp",
+        "php" => "php",
+        "kt" => "kotlin",
+        "swift" => "swift",
+        "scala" => "scala",
+        "sh" | "bash" => "shell",
+        "lua" => "lua",
+        "sql" => "sql",
         _ => "text",
     }
 }
@@ -349,6 +508,7 @@ fn extract_markdown(text: &str) -> Vec<StructureItem> {
             start_line: idx + 1,
             end_line: idx + 1,
             line_count: 1,
+            scope: None,
         });
     }
     items
@@ -520,23 +680,170 @@ fn structure_item(kind: &str, label: &str, line_number: usize) -> StructureItem 
         start_line: line_number,
         end_line: line_number,
         line_count: 1,
+        scope: None,
     }
 }
 
-/// Approximate ending ranges: an item ends the line before the next item
-/// begins. See the module note.
+/// `ctags` qualifies a parent name with its enclosing scopes in some languages.
+/// Go reports `main.Server` for a struct whose own tag label is plain `Server`,
+/// so containment has to match on the final segment.
+fn names_agree(label: &str, scope_name: &str) -> bool {
+    label == scope_name || scope_name.ends_with(&format!(".{label}"))
+}
+
+/// Approximate ending ranges, containment aware when the extractor reports
+/// scopes. An item is bounded by the next item that is not nested inside it, so
+/// a struct is not truncated by its own fields. See the module note.
 fn finalize_ranges(text: &str, items: &mut [StructureItem]) {
     let total_lines = text.lines().count().max(1);
+
+    // Resolve containment first. `ctags` reports a parent as `kind:name`, but the
+    // name repeats: a struct and every impl of it all carry the label
+    // `DisplayConfig`. So the parent is the nearest preceding item whose kind
+    // and label both match the scope, which is what lets two impls of the same
+    // type tell their methods apart.
+    let mut parents: Vec<Option<usize>> = vec![None; items.len()];
     for idx in 0..items.len() {
-        let end = if idx + 1 < items.len() {
-            items[idx + 1]
-                .start_line
-                .saturating_sub(1)
-                .max(items[idx].start_line)
-        } else {
-            total_lines
+        let Some(scope) = items[idx].scope.as_deref() else {
+            continue;
         };
+        let Some((kind, name)) = scope.split_once(':') else {
+            continue;
+        };
+        parents[idx] = (0..idx)
+            .rev()
+            .find(|prev| items[*prev].kind == kind && names_agree(&items[*prev].label, name));
+    }
+
+    fn descends(parents: &[Option<usize>], mut child: usize, ancestor: usize) -> bool {
+        while let Some(parent) = parents[child] {
+            if parent == ancestor {
+                return true;
+            }
+            child = parent;
+        }
+        false
+    }
+
+    for idx in 0..items.len() {
+        // An item declared inside another does not end it, so a struct is not
+        // truncated to its first line by its own fields. Only the next item that
+        // is not a descendant bounds the extent.
+        let end = items
+            .iter()
+            .enumerate()
+            .skip(idx + 1)
+            .find(|(later, _)| !descends(&parents, *later, idx))
+            .map(|(_, later)| later.start_line.saturating_sub(1))
+            .unwrap_or(total_lines)
+            .max(items[idx].start_line);
         items[idx].end_line = end;
         items[idx].line_count = end.saturating_sub(items[idx].start_line) + 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(kind: &str, label: &str, start_line: usize, scope: Option<&str>) -> StructureItem {
+        StructureItem {
+            kind: kind.to_string(),
+            label: label.to_string(),
+            start_line,
+            end_line: start_line,
+            line_count: 1,
+            scope: scope.map(|s| s.to_string()),
+        }
+    }
+
+    /// The tag lines below are the real shape `ctags` emits with
+    /// `--fields=+nKZ`: name, path, pattern, kind, then `key:value` fields.
+    #[test]
+    fn parses_ctags_lines_into_items_with_scope() {
+        let tags = concat!(
+            "!_TAG_FILE_FORMAT\t2\t/extended format/\n",
+            "DisplayConfig\tcrates/x/display.rs\t/^pub struct DisplayConfig {$/;\"\tstruct\tline:12\n",
+            "diff_mode\tcrates/x/display.rs\t/^    pub diff_mode: bool,$/;\"\tfield\tline:15\tscope:struct:DisplayConfig\n",
+            "set_default\tcrates/x/display.rs\t/^    fn set_default() {$/;\"\tmethod\tline:180\tscope:implementation:DisplayConfig\n",
+            "unplaceable\tcrates/x/display.rs\t/^whatever$/;\"\tfield\n",
+        );
+        let items = parse_ctags_tags(tags);
+
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, vec!["DisplayConfig", "diff_mode", "set_default"]);
+        assert_eq!(items[0].kind, "struct");
+        assert_eq!(items[0].start_line, 12);
+        assert_eq!(items[0].scope, None);
+        assert_eq!(items[1].kind, "field");
+        assert_eq!(items[1].scope.as_deref(), Some("struct:DisplayConfig"));
+        // A scope kind is normalized to match our own vocabulary, and a tag with
+        // no line number is dropped rather than reported at line zero.
+        assert_eq!(items[2].kind, "method");
+        assert_eq!(items[2].scope.as_deref(), Some("impl:DisplayConfig"));
+    }
+
+    /// Go indents with tabs and `ctags` puts the raw line in the pattern field,
+    /// so the pattern contains a literal tab. Indexing fields positionally reads
+    /// the kind as the rest of the pattern, which silently mislabels the item.
+    #[test]
+    fn a_tab_inside_the_pattern_does_not_shift_the_kind() {
+        let tags = "Host\tcrates/x/sample.go\t/^\tHost string$/;\"\tmember\tline:4\tscope:struct:main.Server\n";
+        let items = parse_ctags_tags(tags);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].label, "Host");
+        assert_eq!(items[0].kind, "member");
+        assert_eq!(items[0].start_line, 4);
+        assert_eq!(items[0].scope.as_deref(), Some("struct:main.Server"));
+    }
+
+    #[test]
+    fn a_parent_is_not_truncated_by_its_own_members() {
+        let mut items = vec![
+            item("struct", "A", 1, None),
+            item("field", "f1", 3, Some("struct:A")),
+            item("field", "f2", 5, Some("struct:A")),
+            item("impl", "A", 8, None),
+            item("method", "m", 9, Some("impl:A")),
+        ];
+        let text = "x\n".repeat(20);
+        finalize_ranges(&text, &mut items);
+
+        // The struct runs to the line before the next sibling, not to the line
+        // before its first field.
+        assert_eq!(items[0].end_line, 7, "struct should not be cut by a field");
+        assert_eq!(items[0].line_count, 7);
+        // The impl covers its method and runs to the end of the file.
+        assert_eq!(items[3].end_line, 20, "impl should swallow its method");
+        // Two impls of the same type are told apart by kind, so the method at 9
+        // attaches to the impl at 8 rather than to the struct at 1.
+        assert_eq!(items[4].scope.as_deref(), Some("impl:A"));
+    }
+
+    /// Go qualifies a parent with the package: it reports `main.Server` for a
+    /// struct whose own label is plain `Server`. Matching only on the full name
+    /// would leave the struct 1 line long with its member floating outside it.
+    #[test]
+    fn a_qualified_scope_name_still_resolves_to_its_parent() {
+        let mut items = vec![
+            item("struct", "Server", 3, None),
+            item("member", "Host", 4, Some("struct:main.Server")),
+            item("func", "Later", 9, None),
+        ];
+        let text = "x\n".repeat(12);
+        finalize_ranges(&text, &mut items);
+        assert_eq!(items[0].end_line, 8, "the struct should contain its member");
+    }
+
+    #[test]
+    fn the_scanner_path_keeps_the_old_approximation() {
+        let mut items = vec![
+            item("function", "a", 1, None),
+            item("function", "b", 9, None),
+        ];
+        let text = "x\n".repeat(12);
+        finalize_ranges(&text, &mut items);
+        assert_eq!(items[0].end_line, 8);
+        assert_eq!(items[1].end_line, 12);
     }
 }

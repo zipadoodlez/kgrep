@@ -557,3 +557,64 @@ fn a_missing_file_is_an_error_with_a_suggestion() {
     assert!(err.contains("file not found"), "got {err}");
     assert!(err.contains("src/session.rs"), "should suggest, got {err}");
 }
+
+/// `ctags` is optional and this feature is one of its callers, so the test skips
+/// rather than fails when the binary is absent. The scanner knows Rust,
+/// TypeScript, Python and Markdown only, so a Go file is the case that proves
+/// the added reach.
+#[test]
+fn outline_covers_a_language_the_scanner_cannot_parse() {
+    let available = std::process::Command::new("ctags")
+        .arg("--version")
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false);
+    if !available {
+        return;
+    }
+
+    let source = concat!(
+        "package main\n",
+        "\n",
+        "type Server struct {\n",
+        "\tHost string\n",
+        "}\n",
+        "\n",
+        "func (s *Server) Start() error {\n",
+        "\treturn nil\n",
+        "}\n",
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(root, "sample.go", source);
+
+    let args = OutlineArgs {
+        file: "sample.go".to_string(),
+        scope: scope(root),
+        json: false,
+        max_items: None,
+        context_json: None,
+    };
+    let result = outline::run_outline(root, &args).expect("outline runs");
+    let labels: Vec<&str> = result
+        .items
+        .iter()
+        .map(|item| item.label.as_str())
+        .collect();
+    assert!(labels.contains(&"Server"), "got {labels:?}");
+    assert!(labels.contains(&"Start"), "got {labels:?}");
+    assert!(
+        labels.contains(&"Host"),
+        "the struct field should be listed, got {labels:?}"
+    );
+
+    // The in-process scanner is what the repo-wide verbs use, and it is the
+    // floor: on this file it finds nothing at all.
+    let scanner = outline::extract_file_structure(Path::new("sample.go"), "sample.go", source);
+    assert!(
+        scanner.items.len() < result.items.len(),
+        "scanner found {} items, ctags found {}",
+        scanner.items.len(),
+        result.items.len()
+    );
+}

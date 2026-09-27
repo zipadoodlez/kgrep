@@ -30,7 +30,7 @@ be allowed in.
 |---|---|---|---|
 | Lexical scan | exact text and regex | none, always available | working |
 | Structure sketch | symbols, ranges | bounded per file | working, line-based |
-| Tag index (ctags) | where is X defined, and what kind of thing it is | one mmapped file, no binary growth | not started, Stage 4 |
+| ctags, per file | structure in ~100 languages | one subprocess per `outline` | working, `outline` only |
 | mmapped n-gram index | fast regex on huge repos | mmapped, evictable | not started |
 | Harness state | what the agent read, what changed | nearly free | partial, in agentgrep |
 | Resolution (ours, approximate) | who might use this | bounded index | not started |
@@ -118,36 +118,45 @@ The budget rules, learned from the benchmark and from reading agentgrep:
 
 ## Where we are: code
 
-1,727 lines of Rust, 8 tests passing, clippy clean at `-D warnings`.
+3,819 lines of Rust across `src`, 26 tests passing, clippy clean at `-D warnings`.
 
 | Module | State |
 |---|---|
 | `model.rs` | `Query`, `Hit`, `Packet`, `Budget`, `Group`, `LineMatch` |
 | `cli.rs` | four verbs, flags matching agentgrep's contract |
 | `scan.rs` | absorbed from agentgrep: walk, ignore rules, non-UTF-8 handling |
-| `outline.rs` | absorbed structure extraction plus the `outline` verb |
-| `lexical.rs` | absorbed grep, reshaped, bounded, `rg` path dropped |
+| `lexical.rs` | absorbed grep, reshaped, bounded, streamed and parallel |
+| `rank.rs` | four cheap signals, one shared weight table, `KGREP_RANK` ablation |
+| `outline.rs` | two backends: the line scanner, and `ctags` for coverage |
+| `find.rs`, `trace.rs` | the other two verbs, ported onto the shaper |
 | `packet.rs` | text and JSON rendering, matching agentgrep's JSON shape |
 | `peak.rs` | peak RSS reporting behind `KGREP_PEAK_RSS` |
-| `main.rs` | wires `grep` and `outline`; `find` and `trace` still exit 2 |
+| `main.rs` | wires all four verbs |
 
 Tooling that exists and works:
 
-- `scripts/bench.py` + `bench/tasks.json` — 17 verified navigation tasks, scored on
+- `scripts/bench.py` + `bench/tasks.json` — 25 verified navigation tasks, scored on
   recall and tokens-to-answer. Baseline in `bench/baseline.json`.
 - `scripts/memcheck.sh` — peak RSS against repo size, small by default.
 
 Known gaps in the code, honestly:
 
-- `find` and `trace` are unimplemented, so the four-verb surface is half done.
-- No ranking for grep hits; `score` is always 0, which blocks "rank before
-  spending".
-- The output cap is a match count, not a token budget, and is not yet the default.
-- Non-UTF-8 display paths use a simpler `#raw=hex` suffix than agentgrep's `#b=`
-  scheme, and `outline` cannot yet resolve a path carrying it, so agentgrep's
-  round-trip contract does not hold in kgrep.
-- The benchmark drives the CLI, which is not the path kcode uses. It needs a
-  harness-faithful oracle.
+- **The two string-keyed regressions.** `grep-mcp-tool` and `grep-swarm-stress` are
+  answered by names registered as string literals, which path, symbols and ctags all
+  cannot see. Reaching them is the resolution work in Stage 6, and no cheap signal
+  was found: five were tried and recorded in `bench/README.md`.
+- **Structure reaches only `outline`.** `ctags` is wired into one verb. `grep`,
+  `find` and `trace` still get no structure at all on a language outside the four,
+  because a per-file subprocess would be fatal across a repository. That needs the
+  repo-wide index, which is deliberately not built.
+- **No real ranges**, so no symbol-scoped edits. The footnote under Stage 4 records
+  why that was demoted, and it is unmeasured rather than refuted.
+- **The worst case is bigger than agentgrep's**: 16,061 output tokens against 6,752
+  on the harness path. Deliberate, because we would rather return the answer than
+  silently cap it away, but it is a real regression on that one axis.
+- **`trace --context-json` is accepted and not applied.** Harness state is Stage 5.
+- **Not shipped.** Attribution for agentgrep is owed, and jcode still runs
+  agentgrep. Every number here comes from the bench, not from the real path.
 
 ## Where we are: theory
 
@@ -310,52 +319,59 @@ so search-then-read round-trips.
 - **Exit met:** parity on the edge corpus, deliberate differences written down,
   and the benchmark measuring the harness path.
 
-### Stage 4 — declarations, from ctags (next)
+### Stage 4 — ctags for coverage (done, narrowly)
 
-Consume `universal-ctags` as a **tag index**: one sorted file, name to file, line,
-kind and scope, read mmapped and never resident. ctags runs at index time only.
-Nothing new is compiled in, so the binary does not grow, and the line-based
-scanner stays as the fallback for when the index is absent or stale.
+Landed as a **per-file subprocess**, not the tag index this stage originally
+planned. Measured first: `ctags` costs 14.5 ms to run on one file, our scanner
+costs 3.2 ms, and a whole-repo index costs 2.9 s. Since `outline` asks about one
+file, the index was never needed, and dropping it removes the artifact, the
+freshness failure mode and the resident memory in one move.
 
-Chosen over an in-process parse because it gets most of the benefit at none of
-the cost. Verified kinds include `m field`, `P method` and `e enumerator`
-alongside structs and functions, and it covers roughly a hundred languages
-against our four, which is the difference between finding nothing and finding
-declarations. The one thing it does not give is end lines: `rust.c`, `go.c`,
-`python.c` and `typescript.c` never call `setTagEndLine`, so there are no real
-extents. An in-process parse for ranges is **cut**, not deferred.
+The routing is one sentence: **the scanner stays the backend for the four
+languages it knows, and `ctags` is the coverage backend for everything else.**
+That was forced by measurement. Using `ctags` everywhere, so its struct fields
+could enrich Rust outlines too, priced four of the five outline tasks worse, p90
+tokens to answer rising 465 to 719, for no recall gain. Routing by language avoids
+that cost entirely: the five outline tasks are unchanged to the token, and a Go,
+Ruby or Java file gains an outline it did not have.
 
-What changes for the caller:
+```
+# the same three files, none of which the scanner can parse
+sample.go    struct Server @ 3-9; member Host @ 4-6; func Start @ 7-9
+sample.rb    class Invoice @ 1-11; accessor total; method initialize; method total_with_tax
+Sample.java  class Sample @ 1-11; field count; method run; method getCount
+```
 
-- **A declaration index.** "Where is X defined" becomes a lookup rather than a
-  scan, and it can say *what* X is, because the tag carries a kind and a scope.
-- **The ranking signal gets real labels.** Declared kind and scope, which the line
-  scanner cannot see. This is *not* what closes the three regressions, contrary to
-  the earlier claim: one is a name ambiguity and two are string-keyed tool names,
-  none of which structure can reach.
-- **Structure where we had none.** Any repository outside our four languages
-  currently gets no structure at all, only match lines.
+What the work actually turned up, all of it measured rather than assumed:
 
-This is still a **signal, not a separate map**: which symbol a hit lives in, what
-kind it is, what encloses it. Those change the answers to ordinary questions, and
-no cross-file resolution is needed.
+- **Scope names are qualified in some languages.** Go reports `main.Server` for a
+  struct whose own label is `Server`, so containment resolves on the final segment.
+- **A pattern field can contain a literal tab**, which Go does by indenting with
+  tabs. Indexing the kind positionally silently mislabelled every Go field, and the
+  kind is now the field after the one closing the pattern.
+- **`member` means different things per language**, a struct field in Go and a
+  method in Python, so no cross-language kind filter is safe. Routing by language
+  sidesteps the question instead of guessing at it.
+- **A `package` declaration swallows the file**, since everything is scoped to it,
+  so it is dropped as file-level metadata rather than structure.
+- **Ranges are now containment aware.** A struct is no longer truncated to one line
+  by its own fields, and two impls of the same type are told apart by kind, so their
+  methods attach to the right one.
 
-Three things to get right:
+`KGREP_CTAGS=off` forces the old scanner everywhere, which is the control.
 
-- **The index must stay optional.** Ranking is index-independent today. Without
-  the index we are exactly where we are now, and that is the floor; the index is
-  the ceiling. Degrading has to be clean and silent-free.
-- **Freshness is a real failure mode.** A stale tag is a wrong answer, silently.
-  The index needs a cheap validity check, and staleness has to be visible rather
-  than assumed.
-- **The kind table is ours.** ctags kinds are per-language and inconsistent, so
-  mapping tag kinds onto our symbol model is code we own and test.
+- **Exit met:** a repository outside our four languages gets real declarations;
+  recall holds at 25/25; the bench moves by nothing but 3 tokens of run variance on
+  one task; peak RSS is unchanged, since nothing is resident and the process is per
+  call. Explicitly **not** part of this exit, as before: the three ranking
+  regressions, which are an ambiguity and two string-keyed names.
 
-- **Exit:** a definition query is answered from the index without a scan; a
-  repository outside our four languages gets real declarations where it currently
-  gets only match lines; recall holds; peak RSS stays under the ceiling with no new
-  resident structure proportional to repository size. Explicitly **not** part of
-  this exit: the three ranking regressions, which are a different problem.
+What is deliberately still not built: the **repo-wide tag index**, which is what
+would make "where is X defined" a lookup instead of a scan. It needs an artifact
+and a freshness story, and definition lookup is the weakest of the three cases,
+because a distinctive name is already easy to find and our latency is already 19.9
+ms. If a real range need or a huge repository shows up with a number attached, that
+is the moment to revisit it.
 
 #### Footnote: edits are not ours to improve
 
@@ -478,7 +494,7 @@ src/
   cli.rs        // clap surface: grep | find | outline | trace
   scan.rs       // file walking, ignore rules, candidate collection
   lexical.rs    // matching, grouping, the grep verb
-  outline.rs    // file structure, and the outline verb
+  outline.rs    // file structure: the scanner, and ctags for coverage
   packet.rs     // ranking, budgets, text and JSON rendering
   peak.rs       // peak RSS, for the memory claim
 bench/          // tasks, baseline, findings
