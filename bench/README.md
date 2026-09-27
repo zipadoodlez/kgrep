@@ -241,6 +241,48 @@ packet: parallel workers need either per-worker bounded heaps merged at the end,
 or a cheap two-pass over a ranked shortlist. Bounding and parallelism have to be
 designed together.
 
+## Differential parity, 2026-09-27
+
+`scripts/parity.py` builds a corpus that is nasty on purpose and compares the
+**set of files found** by kgrep and by the oracle. Not the rendering: whether
+they look at the same files, which is where two implementations of a walker
+drift apart and which no normal repository exercises.
+
+Thirteen cases, all agreeing: literal and regex grep, `--type`, `--glob`,
+`glob + type` together, `--hidden`, `--no-ignore`, an extension-less file, a
+symlink to a file, a symlink to a directory, a name that is not valid UTF-8, a
+binary file, and two `find` queries.
+
+Comparison strips the display suffix, because the two tools deliberately spell
+non-UTF-8 names differently (agentgrep `#b=`, kgrep `#raw=`, both injective).
+Whether they find the same files is the question; how they render an
+unrepresentable name is a documented difference.
+
+### What the harness found
+
+**A real behavioural difference, and a version difference underneath it.**
+agentgrep v0.1.6 has no `follow_links` call at all, so it uses the `ignore`
+crate's default of false. But it also has no symlink guard, so a symlink **to a
+file** is searched, because `is_file()` follows the link, while a symlink **to a
+directory** is not descended. kgrep had inherited v0.1.7's guard, which excluded
+both. The guard is gone and kgrep now matches 0.1.6 exactly, with `--follow`
+adding directory symlinks on top.
+
+**That settled a flag.** Following symlinks landed in v0.1.7; kcode runs 0.1.6,
+and ripgrep does not follow by default either. So the default is now *not* to
+follow, with `--follow` as the opt-in, replacing `--no-follow`. The duplicate
+paths that following produced, one under the real path and one under the link,
+are gone with it.
+
+**And `outline` now closes the round trip.** A path printed by `grep` for a name
+that is not valid UTF-8 carries a `#raw=<hex>` suffix; `outline` decodes it, so
+search-then-read works for exactly the files whose names cannot be retyped.
+
+Note that parity is against the **pinned** version. `--no-follow` does not exist
+in 0.1.6, so it cannot be compared there at all, and anything else that landed in
+v0.1.7 needs the same treatment: check which version kcode runs before calling a
+difference a bug.
+
 ## The ranking experiment, 2026-09-27
 
 "Rank before spending" needs a score, and grep had none. Six variants were

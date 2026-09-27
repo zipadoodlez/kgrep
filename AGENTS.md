@@ -280,21 +280,36 @@ subject is written `mcp_call` and the type that defines it is written
 familiarity is accepted but not applied. That is harness state, which is Stage 6,
 and half-porting it would put the seam in the wrong place.
 
-### Stage 3 — make the measurement absolute (next)
+### Stage 3 — make the measurement absolute (done)
 
-The CLI harness is fine for relative A/B, which is all Stage 1 needs, because the
-two tools are measured the same way. It is not fine for claims about what a model
-sees. A bench binary that links agentgrep `v0.1.6` and calls `run_grep` +
-`render_grep_output(Some(200))` is the honest oracle.
+**The honest oracle exists.** `bench/oracle` links agentgrep `v0.1.6` at the
+pinned revision `b01b8040` and renders through the same call path kcode uses,
+including the `Some(200)` grep cap. It sits outside kgrep, because kgrep must not
+depend on what it replaces, and it disappears after the swap. The earlier CLI
+numbers are superseded by it.
 
-Also here: differential parity against agentgrep on the edges (non-UTF-8 names,
-symlinks, globs, glob+type, extension-less files), and fixing the non-UTF-8
-round-trip so `outline` accepts what `grep` emits.
+**Differential parity passes.** `scripts/parity.py` builds a corpus that is
+nasty on purpose and compares the set of files found: 13 cases covering
+non-UTF-8 names, file and directory symlinks, globs, glob+type, hidden,
+no-ignore, binary refusal, empty files and extension-less files. All agree.
 
-- **Exit:** parity on UTF-8 corpora, deliberate differences written down, and the
-  benchmark measuring the harness path.
+**It found a real behavioural difference, and fixed it.** agentgrep v0.1.6 never
+calls `follow_links`, so it uses the `ignore` default of false, and it has no
+symlink guard either, so a symlink to a *file* is searched while a symlink to a
+*directory* is not descended. kgrep had inherited v0.1.7's guard, which excluded
+both. That is fixed.
 
-### Stage 4 — real structure, and the grokking
+**Which also settled a flag.** Following symlinks is a v0.1.7 behaviour, kcode
+runs v0.1.6, and ripgrep does not follow by default either. The default is now
+not to follow, with `--follow` as the opt-in in place of `--no-follow`.
+
+**And `outline` accepts what `grep` prints** for a name that is not valid UTF-8,
+so search-then-read round-trips.
+
+- **Exit met:** parity on the edge corpus, deliberate differences written down,
+  and the benchmark measuring the harness path.
+
+### Stage 4 — real structure, and the grokking (next)
 
 Adopt `ast-grep-core` and `ast-grep-language` (skip `ast-grep-config`), with a
 small query file per language. Keep the line-based scanner as the fallback for
