@@ -1,7 +1,7 @@
 //! The shaper end to end: choose files, match, group, packet.
 
 use kgrep::cli::{FindArgs, FullRegionMode, GrepArgs, OutlineArgs, ScopeArgs, TraceArgs};
-use kgrep::model::Budget;
+use kgrep::model::{Budget, Query, Verb};
 use kgrep::{find, lexical, outline, trace};
 use std::fs;
 use std::path::Path;
@@ -17,7 +17,7 @@ fn scope(path: &Path) -> ScopeArgs {
     }
 }
 
-fn grep_args(path: &Path, query: &str, regex: bool) -> GrepArgs {
+fn grep_args(path: &Path, query: &str, regex: bool) -> Query {
     GrepArgs {
         query: query.to_string(),
         scope: scope(path),
@@ -28,6 +28,7 @@ fn grep_args(path: &Path, query: &str, regex: bool) -> GrepArgs {
         max_hits: None,
         unbounded: false,
     }
+    .to_query()
 }
 
 fn write(root: &Path, relative: &str, body: &str) {
@@ -48,12 +49,8 @@ fn matches_group_under_the_enclosing_symbol() {
         "pub fn auth_status() -> bool {\n    true\n}\n\npub fn unrelated() {}\n",
     );
 
-    let packet = lexical::run_grep(
-        root,
-        &grep_args(root, "auth_status", false),
-        Budget::default(),
-    )
-    .expect("grep runs");
+    let packet = lexical::run_grep(&grep_args(root, "auth_status", false), Budget::default())
+        .expect("grep runs");
 
     assert_eq!(packet.total_files, 1);
     assert_eq!(packet.total_matches, 1);
@@ -78,8 +75,8 @@ fn non_matching_files_are_absent() {
     write(root, "a.rs", "pub fn wanted() {}\n");
     write(root, "b.rs", "pub fn other() {}\n");
 
-    let packet = lexical::run_grep(root, &grep_args(root, "wanted", false), Budget::default())
-        .expect("grep runs");
+    let packet =
+        lexical::run_grep(&grep_args(root, "wanted", false), Budget::default()).expect("grep runs");
 
     assert_eq!(packet.total_files, 1);
     assert_eq!(packet.hits[0].path, "a.rs");
@@ -95,7 +92,7 @@ fn regex_mode_matches_patterns() {
         "fn auth_one() {}\nfn auth_two() {}\nfn other() {}\n",
     );
 
-    let packet = lexical::run_grep(root, &grep_args(root, r"auth_\w+", true), Budget::default())
+    let packet = lexical::run_grep(&grep_args(root, r"auth_\w+", true), Budget::default())
         .expect("grep runs");
 
     assert_eq!(packet.total_matches, 2);
@@ -107,7 +104,7 @@ fn an_invalid_regex_is_an_error_not_a_crash() {
     let root = dir.path();
     write(root, "a.rs", "fn x() {}\n");
 
-    let err = lexical::run_grep(root, &grep_args(root, "(", true), Budget::default())
+    let err = lexical::run_grep(&grep_args(root, "(", true), Budget::default())
         .expect_err("invalid regex should fail");
     assert!(err.contains("invalid regex"), "unexpected error: {err}");
 }
@@ -123,8 +120,7 @@ fn the_budget_bounds_stored_matches_but_not_the_count() {
         max_total_matches: 10,
         ..Budget::default()
     };
-    let packet =
-        lexical::run_grep(root, &grep_args(root, "needle", false), budget).expect("grep runs");
+    let packet = lexical::run_grep(&grep_args(root, "needle", false), budget).expect("grep runs");
 
     assert_eq!(packet.total_matches, 50, "the count stays exact");
     assert_eq!(
@@ -144,7 +140,7 @@ fn paths_only_stores_no_match_bodies() {
 
     let mut args = grep_args(root, "needle", false);
     args.paths_only = true;
-    let packet = lexical::run_grep(root, &args, Budget::default()).expect("grep runs");
+    let packet = lexical::run_grep(&args, Budget::default()).expect("grep runs");
 
     assert_eq!(packet.total_files, 1);
     assert!(packet.hits[0].matches.is_empty());
@@ -167,8 +163,9 @@ fn outline_lists_symbols_for_a_known_file() {
         json: false,
         max_items: None,
         context_json: None,
-    };
-    let result = outline::run_outline(root, &args).expect("outline runs");
+    }
+    .to_query();
+    let result = outline::run_outline(&args).expect("outline runs");
 
     let labels: Vec<&str> = result
         .items
@@ -194,8 +191,7 @@ fn the_detail_budget_summarizes_but_keeps_the_count() {
         max_detail_tokens: Some(1),
         ..Budget::default()
     };
-    let packet =
-        lexical::run_grep(root, &grep_args(root, "needle", false), budget).expect("grep runs");
+    let packet = lexical::run_grep(&grep_args(root, "needle", false), budget).expect("grep runs");
 
     // The count is the truth regardless of what detail survived.
     assert_eq!(packet.total_matches, 41);
@@ -235,8 +231,7 @@ fn the_hit_cap_bounds_coverage_and_reports_the_truth() {
         max_hits: Some(2),
         ..Budget::default()
     };
-    let packet =
-        lexical::run_grep(root, &grep_args(root, "needle", false), budget).expect("grep runs");
+    let packet = lexical::run_grep(&grep_args(root, "needle", false), budget).expect("grep runs");
 
     assert_eq!(packet.hits.len(), 2, "only two files are listed");
     assert_eq!(packet.total_files, 3, "but the total stays honest");
@@ -257,8 +252,7 @@ fn an_unbounded_budget_reports_everything() {
         max_detail_tokens: None,
         ..Budget::default()
     };
-    let packet =
-        lexical::run_grep(root, &grep_args(root, "needle", false), budget).expect("grep runs");
+    let packet = lexical::run_grep(&grep_args(root, "needle", false), budget).expect("grep runs");
 
     assert_eq!(packet.hits.len(), 3);
     assert_eq!(packet.unlisted_files, 0);
@@ -280,8 +274,9 @@ fn find_ranks_by_path_evidence() {
         json: false,
         paths_only: false,
         debug_score: false,
-    };
-    let packet = find::run_find(root, &args, Budget::default()).expect("find runs");
+    }
+    .to_query();
+    let packet = find::run_find(&args, Budget::default()).expect("find runs");
 
     assert_eq!(packet.hits.len(), 1, "only the path that says auth/session");
     assert_eq!(packet.hits[0].path, "src/auth/session.rs");
@@ -308,8 +303,9 @@ fn find_refuses_a_file_whose_path_says_nothing() {
         json: false,
         paths_only: false,
         debug_score: false,
-    };
-    let packet = find::run_find(root, &args, Budget::default()).expect("find runs");
+    }
+    .to_query();
+    let packet = find::run_find(&args, Budget::default()).expect("find runs");
 
     assert!(
         packet.hits.is_empty(),
@@ -333,8 +329,9 @@ fn find_reports_the_true_total_when_it_caps() {
         json: false,
         paths_only: false,
         debug_score: false,
-    };
-    let packet = find::run_find(root, &args, Budget::default()).expect("find runs");
+    }
+    .to_query();
+    let packet = find::run_find(&args, Budget::default()).expect("find runs");
 
     assert_eq!(packet.hits.len(), 2);
     assert_eq!(packet.total_files, 3, "the total stays honest");
@@ -384,8 +381,8 @@ fn trace_finds_a_definition_spelled_differently() {
         "fn checks_the_surface() {\n    let a = \"mcp_call\";\n    let b = \"mcp_call\";\n}\n",
     );
 
-    let args = trace_args(&["subject:mcp_call", "relation:defined"]);
-    let packet = trace::run_trace(root, &args, Budget::default()).expect("trace runs");
+    let args = trace_args(root, &["subject:mcp_call", "relation:defined"]);
+    let packet = trace::run_trace(&args, Budget::default()).expect("trace runs");
 
     assert_eq!(
         packet.hits[0].path,
@@ -412,8 +409,11 @@ fn trace_kind_code_excludes_documentation() {
     );
     write(root, "src/view.rs", "// auth_status\npub fn draw() {}\n");
 
-    let args = trace_args(&["subject:auth_status", "relation:rendered", "kind:code"]);
-    let packet = trace::run_trace(root, &args, Budget::default()).expect("trace runs");
+    let args = trace_args(
+        root,
+        &["subject:auth_status", "relation:rendered", "kind:code"],
+    );
+    let packet = trace::run_trace(&args, Budget::default()).expect("trace runs");
 
     assert!(
         packet.hits.iter().all(|hit| !hit.path.ends_with(".md")),
@@ -433,9 +433,11 @@ fn trace_reports_the_true_total_when_it_caps() {
         );
     }
 
-    let mut args = trace_args(&["subject:widget", "relation:rendered"]);
-    args.max_files = 2;
-    let packet = trace::run_trace(root, &args, Budget::default()).expect("trace runs");
+    let mut args = trace_args(root, &["subject:widget", "relation:rendered"]);
+    if let Verb::Structural { max_files, .. } = &mut args.verb {
+        *max_files = 2;
+    }
+    let packet = trace::run_trace(&args, Budget::default()).expect("trace runs");
 
     assert_eq!(packet.hits.len(), 2);
     assert_eq!(packet.total_files, 3, "the total stays honest");
@@ -459,7 +461,7 @@ fn a_symlinked_directory_is_seen_the_same_way_by_both_walkers() {
     };
     let collected = kgrep::scan::collect_file_entries(&scope);
 
-    let packet = lexical::run_grep(root, &grep_args(root, "SYMTOKEN", false), Budget::default())
+    let packet = lexical::run_grep(&grep_args(root, "SYMTOKEN", false), Budget::default())
         .expect("grep runs");
 
     assert_eq!(
@@ -477,17 +479,10 @@ fn a_symlinked_directory_is_seen_the_same_way_by_both_walkers() {
     );
 }
 
-fn trace_args(terms: &[&str]) -> TraceArgs {
+fn trace_args(root: &Path, terms: &[&str]) -> Query {
     TraceArgs {
         terms: terms.iter().map(|term| term.to_string()).collect(),
-        scope: ScopeArgs {
-            file_type: None,
-            glob: None,
-            hidden: false,
-            no_ignore: false,
-            follow: false,
-            path: None,
-        },
+        scope: scope(root),
         max_files: 5,
         max_regions: 6,
         full_region: FullRegionMode::Auto,
@@ -497,6 +492,8 @@ fn trace_args(terms: &[&str]) -> TraceArgs {
         debug_score: false,
         context_json: None,
     }
+    .to_query()
+    .expect("the DSL parses")
 }
 
 #[test]
@@ -515,7 +512,7 @@ fn outline_accepts_the_path_grep_printed_for_an_odd_name() {
     let renamed = root.join(std::ffi::OsString::from_vec(bytes));
     std::fs::rename(&odd, &renamed).unwrap();
 
-    let packet = lexical::run_grep(root, &grep_args(root, "ODDTOKEN", false), Budget::default())
+    let packet = lexical::run_grep(&grep_args(root, "ODDTOKEN", false), Budget::default())
         .expect("grep runs");
     let printed = packet.hits[0].path.clone();
     assert!(
@@ -530,8 +527,9 @@ fn outline_accepts_the_path_grep_printed_for_an_odd_name() {
         json: false,
         max_items: None,
         context_json: None,
-    };
-    let outlined = outline::run_outline(root, &args)
+    }
+    .to_query();
+    let outlined = outline::run_outline(&args)
         .unwrap_or_else(|err| panic!("outline should accept {printed:?}: {err}"));
     assert!(
         outlined.items.iter().any(|item| item.label == "findable"),
@@ -552,8 +550,9 @@ fn a_missing_file_is_an_error_with_a_suggestion() {
         json: false,
         max_items: None,
         context_json: None,
-    };
-    let err = outline::run_outline(root, &args).expect_err("missing file should fail");
+    }
+    .to_query();
+    let err = outline::run_outline(&args).expect_err("missing file should fail");
     assert!(err.contains("file not found"), "got {err}");
     assert!(err.contains("src/session.rs"), "should suggest, got {err}");
 }
@@ -594,8 +593,9 @@ fn outline_covers_a_language_the_scanner_cannot_parse() {
         json: false,
         max_items: None,
         context_json: None,
-    };
-    let result = outline::run_outline(root, &args).expect("outline runs");
+    }
+    .to_query();
+    let result = outline::run_outline(&args).expect("outline runs");
     let labels: Vec<&str> = result
         .items
         .iter()

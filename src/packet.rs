@@ -4,8 +4,7 @@
 //! packet, so it never touches the filesystem and never grows memory beyond the
 //! string it builds.
 
-use crate::cli::GrepArgs;
-use crate::model::{Hit, Packet};
+use crate::model::{Hit, Packet, RenderOptions};
 use crate::outline::OutlineResult;
 use serde::Serialize;
 
@@ -15,8 +14,8 @@ const MAX_NON_CODE_MATCH_LINES_PER_FILE: usize = 3;
 
 // --- grep ------------------------------------------------------------------
 
-pub fn render_grep_text(packet: &Packet, args: &GrepArgs) -> String {
-    if args.paths_only {
+pub fn render_grep_text(packet: &Packet) -> String {
+    if packet.paths_only {
         return packet
             .hits
             .iter()
@@ -34,7 +33,7 @@ pub fn render_grep_text(packet: &Packet, args: &GrepArgs) -> String {
     ];
 
     for hit in &packet.hits {
-        render_grep_hit(hit, args, &mut lines);
+        render_grep_hit(hit, &packet.query, packet.regex, &mut lines);
     }
 
     if packet.omitted_matches > 0 {
@@ -61,7 +60,7 @@ pub fn render_grep_text(packet: &Packet, args: &GrepArgs) -> String {
     lines.join("\n")
 }
 
-fn render_grep_hit(hit: &Hit, args: &GrepArgs, lines: &mut Vec<String>) {
+fn render_grep_hit(hit: &Hit, query: &str, regex: bool, lines: &mut Vec<String>) {
     lines.push(String::new());
     lines.push(hit.path.clone());
 
@@ -116,7 +115,7 @@ fn render_grep_hit(hit: &Hit, args: &GrepArgs, lines: &mut Vec<String>) {
             _ => lines.push(format!("    - {}", group.label)),
         }
         for line_match in visible {
-            let text = compact_rendered_match_line(&line_match.line_text, &args.query, args.regex);
+            let text = compact_rendered_match_line(&line_match.line_text, query, regex);
             lines.push(format!("      - @ {} {}", line_match.line_number, text));
             displayed += 1;
         }
@@ -298,8 +297,8 @@ pub fn grep_json(packet: &Packet) -> serde_json::Value {
 
 // --- find ------------------------------------------------------------------
 
-pub fn render_find_text(packet: &Packet, args: &crate::cli::FindArgs) -> String {
-    if args.paths_only {
+pub fn render_find_text(packet: &Packet, options: &RenderOptions) -> String {
+    if packet.paths_only {
         return packet
             .hits
             .iter()
@@ -317,7 +316,7 @@ pub fn render_find_text(packet: &Packet, args: &crate::cli::FindArgs) -> String 
         lines.push(String::new());
         lines.push(format!("{}. {}", idx + 1, hit.path));
         lines.push(format!("   role: {}  language: {}", hit.role, hit.language));
-        if args.debug_score {
+        if options.debug_score {
             lines.push(format!("   score: {}", hit.score));
         }
         lines.push("   why:".to_string());
@@ -407,8 +406,8 @@ pub fn find_json(packet: &Packet) -> serde_json::Value {
 
 // --- trace -----------------------------------------------------------------
 
-pub fn render_trace_text(packet: &Packet, args: &crate::cli::TraceArgs) -> String {
-    if args.paths_only {
+pub fn render_trace_text(packet: &Packet, options: &RenderOptions) -> String {
+    if packet.paths_only {
         return packet
             .hits
             .iter()
@@ -426,7 +425,7 @@ pub fn render_trace_text(packet: &Packet, args: &crate::cli::TraceArgs) -> Strin
         lines.push(String::new());
         lines.push(format!("{}. {}", idx + 1, hit.path));
         lines.push(format!("   role: {}  language: {}", hit.role, hit.language));
-        if args.debug_score {
+        if options.debug_score {
             lines.push(format!("   score: {}", hit.score));
         }
         lines.push("   why:".to_string());
@@ -439,7 +438,7 @@ pub fn render_trace_text(packet: &Packet, args: &crate::cli::TraceArgs) -> Strin
                 "   - {} {} @ {}-{}",
                 region.kind, region.label, region.start_line, region.end_line
             ));
-            if args.debug_score {
+            if options.debug_score {
                 lines.push(format!("     region score: {}", region.score));
                 for reason in &region.why {
                     lines.push(format!("       - {reason}"));

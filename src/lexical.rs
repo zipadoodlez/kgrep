@@ -13,8 +13,7 @@
 //! parsing and parity fixups for a second searcher that had to agree with this
 //! one. One searcher is enough until a benchmark says otherwise.
 
-use crate::cli::GrepArgs;
-use crate::model::{Budget, Group, Hit, LineMatch, Packet};
+use crate::model::{Budget, Group, Hit, LineMatch, Packet, Query, Verb};
 use crate::outline::{extract_file_structure, infer_role};
 use crate::scan::{FileEntry, ScanConfig, SearchScope, read_text_file};
 use ignore::WalkState;
@@ -43,16 +42,13 @@ struct Accum {
     truncated: bool,
 }
 
-pub fn run_grep(root: &Path, args: &GrepArgs, budget: Budget) -> Result<Packet, String> {
-    let matcher = Matcher::new(&args.query, args.regex)?;
-    let scope = SearchScope {
-        root,
-        file_type: args.scope.file_type.as_deref(),
-        glob: args.scope.glob.as_deref(),
-        hidden: args.scope.hidden,
-        no_ignore: args.scope.no_ignore,
-        follow: args.scope.follow,
+pub fn run_grep(query: &Query, budget: Budget) -> Result<Packet, String> {
+    let Verb::Lexical { text, regex } = &query.verb else {
+        return Err("grep needs a lexical query".to_string());
     };
+    let root = query.root();
+    let matcher = Matcher::new(text, *regex)?;
+    let scope = SearchScope::from_where(&query.where_);
     let config = ScanConfig::new(&scope);
 
     // Streamed, not collected. The walker hands entries to the workers as it
@@ -66,7 +62,7 @@ pub fn run_grep(root: &Path, args: &GrepArgs, budget: Budget) -> Result<Packet, 
 
     config.walker().build_parallel().run(|| {
         let matcher = matcher.clone();
-        let args = args.clone();
+        let paths_only = query.paths_only;
         let config = config.clone();
         let accum = Arc::clone(&accum);
         let spent = Arc::clone(&spent);
@@ -85,7 +81,7 @@ pub fn run_grep(root: &Path, args: &GrepArgs, budget: Budget) -> Result<Packet, 
 
             let already = spent.load(Ordering::Relaxed);
             let Some((stored, total_in_file, hit)) =
-                scan_file(&file, &text, &matcher, &args, budget, already)
+                scan_file(&file, &text, &matcher, paths_only, budget, already)
             else {
                 return WalkState::Continue;
             };
@@ -117,10 +113,10 @@ pub fn run_grep(root: &Path, args: &GrepArgs, budget: Budget) -> Result<Packet, 
     // Rank, then order. Without this a budget would truncate an unranked list
     // and keep whichever hits happen to sort first by path.
     let ranking = crate::rank::Ranking::from_env();
-    let tokens = crate::rank::query_tokens(&args.query);
+    let tokens = crate::rank::query_tokens(text);
     if ranking != crate::rank::Ranking::None {
         for hit in &mut hits {
-            let (score, why) = crate::rank::score(hit, &args.query, &tokens, ranking);
+            let (score, why) = crate::rank::score(hit, text, &tokens, ranking);
             hit.score = score;
             hit.why = why;
         }
@@ -129,7 +125,8 @@ pub fn run_grep(root: &Path, args: &GrepArgs, budget: Budget) -> Result<Packet, 
     // output never depends on which worker finished first.
     hits.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
 
-    let mut packet = Packet::new(args.query.clone(), args.regex, root.display().to_string());
+    let mut packet = Packet::new(text.clone(), *regex, root.display().to_string());
+    packet.paths_only = query.paths_only;
     packet.total_files = hits.len();
     packet.total_matches = total_matches;
     packet.omitted_matches = omitted_matches;
@@ -230,7 +227,7 @@ fn scan_file(
     entry: &FileEntry,
     text: &str,
     matcher: &Matcher,
-    args: &GrepArgs,
+    paths_only: bool,
     budget: Budget,
     spent_matches: usize,
 ) -> Option<(usize, usize, Hit)> {
@@ -244,7 +241,7 @@ fn scan_file(
         }
         total += 1;
         // `paths_only` never needs match bodies, so it stores none.
-        if args.paths_only {
+        if paths_only {
             continue;
         }
         if spent_matches + stored.len() < budget.max_total_matches {
@@ -260,7 +257,7 @@ fn scan_file(
     }
 
     let language = infer_language(&entry.path);
-    if args.paths_only {
+    if paths_only {
         let hit = Hit::empty(path, infer_role(&entry.relative_path), language);
         return Some((0, total, hit));
     }

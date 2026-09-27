@@ -3,7 +3,7 @@
 //! Four front doors over one core. The flags here are a compatibility contract
 //! for humans, scripts, and kcode: keep them exact.
 
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand};
 
 #[derive(Debug, Clone, Parser)]
 #[command(
@@ -188,9 +188,87 @@ pub struct TraceArgs {
     pub context_json: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum FullRegionMode {
-    Auto,
-    Always,
-    Never,
+/// How much of a matched region `trace` expands.
+///
+/// It lives in `model` because it is part of what a query asks for, and is
+/// re-exported here so the CLI, and kcode, can keep naming it from one place.
+pub use crate::model::FullRegionMode;
+
+impl ScopeArgs {
+    /// The tree to search: the given path, or the working directory.
+    fn root_or_cwd(&self) -> std::path::PathBuf {
+        self.path
+            .as_ref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().expect("current directory"))
+    }
+
+    /// The shared narrowing, translated once so every verb agrees.
+    fn to_where(&self, root: impl Into<std::path::PathBuf>) -> crate::model::Where {
+        crate::model::Where {
+            root: root.into(),
+            glob: self.glob.clone(),
+            file_type: self.file_type.clone(),
+            hidden: self.hidden,
+            no_ignore: self.no_ignore,
+            follow: self.follow,
+        }
+    }
+}
+
+impl GrepArgs {
+    /// Turn the flags into the one query shape the library takes.
+    pub fn to_query(&self) -> crate::model::Query {
+        crate::model::Query {
+            where_: self.scope.to_where(self.scope.root_or_cwd()),
+            paths_only: self.paths_only,
+            verb: crate::model::Verb::Lexical {
+                text: self.query.clone(),
+                regex: self.regex,
+            },
+        }
+    }
+}
+
+impl FindArgs {
+    pub fn to_query(&self) -> crate::model::Query {
+        crate::model::Query {
+            where_: self.scope.to_where(self.scope.root_or_cwd()),
+            paths_only: self.paths_only,
+            verb: crate::model::Verb::Path {
+                terms: self.query_parts.clone(),
+                max_files: self.max_files,
+            },
+        }
+    }
+}
+
+impl OutlineArgs {
+    pub fn to_query(&self) -> crate::model::Query {
+        crate::model::Query {
+            where_: self.scope.to_where(self.scope.root_or_cwd()),
+            paths_only: false,
+            verb: crate::model::Verb::Outline {
+                file: self.file.clone(),
+                max_items: self.max_items,
+            },
+        }
+    }
+}
+
+impl TraceArgs {
+    /// The DSL is parsed here, at the edge, so the library takes a finished
+    /// query rather than a list of strings it would have to interpret.
+    pub fn to_query(&self) -> Result<crate::model::Query, String> {
+        Ok(crate::model::Query {
+            where_: self.scope.to_where(self.scope.root_or_cwd()),
+            paths_only: self.paths_only,
+            verb: crate::model::Verb::Structural {
+                query: crate::trace::parse_query(&self.terms)?,
+                max_files: self.max_files,
+                max_regions: self.max_regions,
+                full_region: self.full_region,
+            },
+        })
+    }
 }

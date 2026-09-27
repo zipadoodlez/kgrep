@@ -15,6 +15,7 @@
 //! injective: two distinct native names can never render the same. This differs
 //! from agentgrep's per-byte token scheme.
 
+use crate::model::Where;
 use ignore::WalkBuilder;
 use ignore::overrides::{Override, OverrideBuilder};
 use std::fs;
@@ -32,6 +33,21 @@ pub struct SearchScope<'a> {
 }
 
 impl<'a> SearchScope<'a> {
+    /// Narrow a search to everything a query's `Where` asks for.
+    ///
+    /// One home for the mapping, because all four verbs narrow identically and
+    /// four copies of it is four places to forget a field.
+    pub fn from_where(where_: &'a Where) -> Self {
+        Self {
+            root: &where_.root,
+            file_type: where_.file_type.as_deref(),
+            glob: where_.glob.as_deref(),
+            hidden: where_.hidden,
+            no_ignore: where_.no_ignore,
+            follow: where_.follow,
+        }
+    }
+
     /// A plain scope: root only, default ignore rules, symlinks not followed.
     pub fn new(root: &'a Path) -> Self {
         Self {

@@ -21,7 +21,7 @@
 //! provide them either, since its Rust, Go, Python and TypeScript parsers never
 //! emit an end line.
 
-use crate::cli::OutlineArgs;
+use crate::model::{Query, Verb};
 use crate::scan::{SearchScope, read_text_file};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -68,17 +68,21 @@ fn scanner_knows(language: &str) -> bool {
     )
 }
 
-pub fn run_outline(root: &Path, args: &OutlineArgs) -> Result<OutlineResult, String> {
-    let path = resolve_outline_path(root, &args.file);
+pub fn run_outline(query: &Query) -> Result<OutlineResult, String> {
+    let root = query.root();
+    let Verb::Outline { file, max_items } = &query.verb else {
+        return Err("outline needs a file".to_string());
+    };
+    let path = resolve_outline_path(root, file);
     let Some(text) = read_text_file(&path) else {
-        return Err(file_not_found_error(root, &args.file, &path));
+        return Err(file_not_found_error(root, file, &path));
     };
     let relative = relative_display(root, &path);
     let structure = extract_outline_structure(&path, &relative, &text);
     let total_lines = text.lines().count();
 
-    let items = match args.max_items {
-        Some(max) => structure.items.iter().take(max).cloned().collect(),
+    let items = match max_items {
+        Some(max) => structure.items.iter().take(*max).cloned().collect(),
         None => structure.items.clone(),
     };
     let omitted_count = structure.items.len().saturating_sub(items.len());

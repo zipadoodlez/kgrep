@@ -15,13 +15,13 @@
 //! would put the seam in the wrong place. The flag is accepted so the CLI
 //! surface is unchanged, and this note is the record of the gap.
 
-use crate::cli::{FullRegionMode, TraceArgs};
-use crate::model::{Budget, Hit, LineMatch, Packet, Region, Relation, StructuralQuery};
+use crate::model::{
+    Budget, FullRegionMode, Hit, LineMatch, Packet, Query, Region, Relation, StructuralQuery, Verb,
+};
 use crate::outline::{StructureItem, extract_file_structure};
 use crate::rank;
 use crate::scan::{ScanConfig, SearchScope, read_text_file};
 use ignore::WalkState;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 /// A region longer than this is shown as its subject lines rather than its
@@ -110,8 +110,25 @@ fn relation_terms(relation: &Relation) -> Vec<String> {
     terms.iter().map(|term| term.to_string()).collect()
 }
 
-pub fn run_trace(root: &Path, args: &TraceArgs, budget: Budget) -> Result<Packet, String> {
-    let query = parse_query(&args.terms)?;
+pub fn run_trace(query: &Query, budget: Budget) -> Result<Packet, String> {
+    let root = query.root();
+    let paths_only = query.paths_only;
+    let scope = SearchScope::from_where(&query.where_);
+    // Everything the shared part of the query holds is read before `query` is
+    // rebound to the structural part, so the rest of this function reads the
+    // same way it always did.
+    let Verb::Structural {
+        query,
+        max_files,
+        max_regions,
+        full_region,
+    } = &query.verb
+    else {
+        return Err("trace needs a structural query".to_string());
+    };
+    let max_files = *max_files;
+    let max_regions = *max_regions;
+    let full_region = *full_region;
     let subject_lower = query.subject.to_ascii_lowercase();
     let subject_stripped = strip_punctuation(&subject_lower);
     let subject_tokens = rank::query_tokens(&query.subject);
@@ -124,18 +141,8 @@ pub fn run_trace(root: &Path, args: &TraceArgs, budget: Budget) -> Result<Packet
     let path_hint = query.path_hint.as_ref().map(|s| s.to_ascii_lowercase());
     let kind = query.kind.clone();
 
-    let scope = SearchScope {
-        root,
-        file_type: args.scope.file_type.as_deref(),
-        glob: args.scope.glob.as_deref(),
-        hidden: args.scope.hidden,
-        no_ignore: args.scope.no_ignore,
-        follow: args.scope.follow,
-    };
     let config = ScanConfig::new(&scope);
     let hits: Arc<Mutex<Vec<Hit>>> = Arc::new(Mutex::new(Vec::new()));
-    let max_regions = args.max_regions;
-    let full_region = args.full_region;
 
     config.walker().build_parallel().run(|| {
         let config = config.clone();
@@ -310,10 +317,11 @@ pub fn run_trace(root: &Path, args: &TraceArgs, budget: Budget) -> Result<Packet
     hits.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
 
     let mut packet = Packet::new(query.label(), false, root.display().to_string());
+    packet.paths_only = paths_only;
     packet.total_files = hits.len();
     let cap = budget
         .max_hits
-        .map_or(args.max_files, |shared| args.max_files.min(shared));
+        .map_or(max_files, |shared| max_files.min(shared));
     if hits.len() > cap {
         packet.unlisted_files = hits.len() - cap;
         packet.truncated = true;

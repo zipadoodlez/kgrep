@@ -6,6 +6,7 @@
 
 use crate::outline::StructureItem;
 use serde::Serialize;
+use std::path::PathBuf;
 
 /// A budget bounds a result so that no tool allocates in proportion to the
 /// repository. Exceeding it truncates and records what was dropped, rather
@@ -44,18 +45,140 @@ impl Default for Budget {
     }
 }
 
-/// A query is the order form. Verbs are constructors over this, not parallel
-/// implementations.
+/// How much of a matched region `trace` expands into the packet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum FullRegionMode {
+    #[default]
+    Auto,
+    Always,
+    Never,
+}
+
+/// Where to look.
+///
+/// A filter set, not a choice: the pieces compose. A caller can ask for the
+/// whole tree, or narrow it by a glob, a type or a role, and does not have to
+/// pick exactly one. Splitting this into a "one of" would drop the ability to
+/// combine a glob with a type, which the CLI already allows.
+///
+/// `root` is the resolved place to search, not a place plus a narrowing: a
+/// single file is a root that happens to be a file, which is how the CLI has
+/// always behaved. There is deliberately no separate `path` field, because two
+/// ways to say where look is one way too many.
+///
+/// Only what the walker itself narrows lives here. A filter one verb applies to
+/// its own candidates, such as trace's `role` or `path_hint`, stays with that
+/// verb, because sharing it would mean moving it between types for no gain.
 #[derive(Debug, Clone)]
-pub enum Query {
+pub struct Where {
+    /// The tree or file to search. Everything else narrows it.
+    pub root: PathBuf,
+    /// A file glob such as `**/*.rs`.
+    pub glob: Option<String>,
+    /// A language or ripgrep type such as `rs`.
+    pub file_type: Option<String>,
+    pub hidden: bool,
+    pub no_ignore: bool,
+    pub follow: bool,
+}
+
+impl Where {
+    /// The whole of `root`, narrowed by nothing.
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self {
+            root: root.into(),
+            glob: None,
+            file_type: None,
+            hidden: false,
+            no_ignore: false,
+            follow: false,
+        }
+    }
+}
+
+/// What is being asked. Exactly one of these is a query's shape, which is why
+/// it is a choice rather than a bag of every verb's settings at once.
+///
+/// Each variant carries that verb's own settings, including its caps, because
+/// they are the verb's and not the walker's. `Lexical` has none: its cap is the
+/// shared `Budget`.
+#[derive(Debug, Clone)]
+pub enum Verb {
     /// Exact lexical search, optionally a regex.
     Lexical { text: String, regex: bool },
     /// Ranked file discovery by path and content terms.
-    Path { terms: Vec<String> },
-    /// Structure of one known file.
-    Outline { file: String },
+    Path {
+        terms: Vec<String>,
+        max_files: usize,
+    },
+    /// Structure of one known file, resolved within `where_.root`.
+    ///
+    /// The file stays here rather than moving into `Where`, because an outline
+    /// resolves a name relative to the search root, so the two are genuinely
+    /// different things rather than two spellings of one.
+    Outline {
+        file: String,
+        /// Cap on listed items. `None` means all of them.
+        max_items: Option<usize>,
+    },
     /// Structured investigation: a subject, a relation, and supporting terms.
-    Structural(StructuralQuery),
+    Structural {
+        query: StructuralQuery,
+        /// Cap on files listed.
+        max_files: usize,
+        /// Cap on regions reported per file.
+        max_regions: usize,
+        /// How far to expand each matched region.
+        full_region: FullRegionMode,
+    },
+}
+
+/// A query is the order form: where to look, what to ask, and whether names are
+/// enough.
+///
+/// Verbs are constructors over this, not parallel implementations. The shared
+/// part is `where_` and `paths_only`; the per-verb settings live inside `Verb`,
+/// so this cannot drift into a bag holding four verbs' fields at once.
+#[derive(Debug, Clone)]
+pub struct Query {
+    /// Trailing underscore because `where` is a keyword.
+    pub where_: Where,
+    /// Names only, no match bodies.
+    ///
+    /// This is part of the question rather than the printing, so it lives here.
+    /// The packet records it too, so a renderer can honour it without being
+    /// told twice.
+    pub paths_only: bool,
+    pub verb: Verb,
+}
+
+impl Query {
+    /// The root to search, which is the only thing every verb needs.
+    pub fn root(&self) -> &std::path::Path {
+        &self.where_.root
+    }
+
+    /// The human-facing query string, used in output headers and JSON.
+    pub fn label(&self) -> String {
+        match &self.verb {
+            Verb::Lexical { text, .. } => text.clone(),
+            Verb::Path { terms, .. } => terms.join(" "),
+            // An outline's target, which is what a reader would call the query.
+            Verb::Outline { file, .. } => file.clone(),
+            Verb::Structural { query, .. } => query.label(),
+        }
+    }
+}
+
+/// Printing choices.
+///
+/// These change how an answer is presented, never what was collected, which is
+/// why they are separate from `Query`. Keeping them out of the CLI argument
+/// structs is what lets rendering be independent of the command line.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RenderOptions {
+    /// Print the ranking score and the reasons behind it.
+    pub debug_score: bool,
 }
 
 /// What a `trace` asks for, once the DSL has been parsed.
@@ -123,18 +246,6 @@ impl Relation {
             Self::Handled => "handled",
             Self::Implementation => "implementation",
             Self::Custom(value) => value.as_str(),
-        }
-    }
-}
-
-impl Query {
-    /// The human-facing query string, used in output headers and JSON.
-    pub fn label(&self) -> String {
-        match self {
-            Query::Lexical { text, .. } => text.clone(),
-            Query::Path { terms } => terms.join(" "),
-            Query::Outline { file } => file.clone(),
-            Query::Structural(query) => query.label(),
         }
     }
 }
@@ -240,6 +351,10 @@ pub struct Packet {
     /// `total_files`, which always reports the truth.
     pub unlisted_files: usize,
     pub truncated: bool,
+    /// The query asked for names only, so no match bodies were stored. Recorded
+    /// here because the renderer would otherwise have to be told a second time,
+    /// and the two copies could disagree.
+    pub paths_only: bool,
 }
 
 impl Packet {
@@ -255,6 +370,7 @@ impl Packet {
             summarized_hits: 0,
             unlisted_files: 0,
             truncated: false,
+            paths_only: false,
         }
     }
 }

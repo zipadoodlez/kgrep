@@ -1,13 +1,32 @@
-use clap::Parser;
-use kgrep::cli::{Cli, Command};
-use kgrep::model::Budget;
-use kgrep::{find, lexical, outline, packet, peak, trace};
-use std::path::PathBuf;
+//! The command line: flags in, one query, one packet, rendered.
+//!
+//! This file is an adapter, not a dispatcher over four implementations. Each arm
+//! turns its flags into the one `Query` shape the library takes, runs it, and
+//! renders the packet. Nothing here knows how searching works.
 
-fn resolve_root(path: &Option<String>) -> PathBuf {
-    match path {
-        Some(path) => PathBuf::from(path),
-        None => std::env::current_dir().expect("current directory"),
+use clap::Parser;
+use kgrep::cli::{Cli, Command, GrepArgs};
+use kgrep::model::{Budget, RenderOptions};
+use kgrep::{find, lexical, outline, packet, peak, trace};
+
+/// The grep budget, which is the only verb whose flags include the opt-out.
+fn grep_budget(args: &GrepArgs) -> Budget {
+    let default = Budget::default();
+    Budget {
+        max_hits: if args.unbounded {
+            None
+        } else {
+            args.max_hits.or(default.max_hits)
+        },
+        max_detail_tokens: if args.unbounded {
+            None
+        } else {
+            Some(
+                args.max_tokens
+                    .unwrap_or(default.max_detail_tokens.unwrap_or(8_000)),
+            )
+        },
+        ..default
     }
 }
 
@@ -16,33 +35,17 @@ fn main() {
 
     let exit = match &cli.command {
         Command::Grep(args) => {
-            let root = resolve_root(&args.scope.path);
-            let budget = Budget {
-                max_hits: if args.unbounded {
-                    None
-                } else {
-                    args.max_hits.or(Budget::default().max_hits)
-                },
-                max_detail_tokens: if args.unbounded {
-                    None
-                } else {
-                    Some(
-                        args.max_tokens
-                            .unwrap_or(Budget::default().max_detail_tokens.unwrap_or(8_000)),
-                    )
-                },
-                ..Budget::default()
-            };
-            match lexical::run_grep(&root, args, budget) {
-                Ok(packet) => {
+            let query = args.to_query();
+            match lexical::run_grep(&query, grep_budget(args)) {
+                Ok(result) => {
                     if args.json {
                         println!(
                             "{}",
-                            serde_json::to_string_pretty(&packet::grep_json(&packet))
+                            serde_json::to_string_pretty(&packet::grep_json(&result))
                                 .expect("serialize grep json")
                         );
                     } else {
-                        println!("{}", packet::render_grep_text(&packet, args));
+                        println!("{}", packet::render_grep_text(&result));
                     }
                     0
                 }
@@ -53,8 +56,8 @@ fn main() {
             }
         }
         Command::Outline(args) => {
-            let root = resolve_root(&args.scope.path);
-            match outline::run_outline(&root, args) {
+            let query = args.to_query();
+            match outline::run_outline(&query) {
                 Ok(result) => {
                     if args.json {
                         println!(
@@ -74,19 +77,22 @@ fn main() {
             }
         }
         Command::Find(args) => {
-            let root = resolve_root(&args.scope.path);
+            let query = args.to_query();
             // `find` caps by its own `--max-files`; the shared hit cap is a
             // second, larger backstop and the smaller of the two wins.
-            match find::run_find(&root, args, Budget::default()) {
-                Ok(packet) => {
+            match find::run_find(&query, Budget::default()) {
+                Ok(result) => {
+                    let options = RenderOptions {
+                        debug_score: args.debug_score,
+                    };
                     if args.json {
                         println!(
                             "{}",
-                            serde_json::to_string_pretty(&packet::find_json(&packet))
+                            serde_json::to_string_pretty(&packet::find_json(&result))
                                 .expect("serialize find json")
                         );
                     } else {
-                        println!("{}", packet::render_find_text(&packet, args));
+                        println!("{}", packet::render_find_text(&result, &options));
                     }
                     0
                 }
@@ -96,30 +102,36 @@ fn main() {
                 }
             }
         }
-        Command::Trace(args) => {
-            let root = resolve_root(&args.scope.path);
-            match trace::run_trace(&root, args, Budget::default()) {
-                Ok(packet) => {
+        Command::Trace(args) => match args.to_query() {
+            Ok(query) => match trace::run_trace(&query, Budget::default()) {
+                Ok(result) => {
+                    let options = RenderOptions {
+                        debug_score: args.debug_score,
+                    };
                     if args.json {
                         println!(
                             "{}",
-                            serde_json::to_string_pretty(&packet::trace_json(&packet))
+                            serde_json::to_string_pretty(&packet::trace_json(&result))
                                 .expect("serialize trace json")
                         );
                     } else {
-                        println!("{}", packet::render_trace_text(&packet, args));
+                        println!("{}", packet::render_trace_text(&result, &options));
                     }
                     0
                 }
                 Err(err) => {
                     eprintln!("error: {err}");
-                    eprintln!();
-                    eprintln!("trace queries use a small DSL. Example:");
-                    eprintln!("  kgrep trace subject:auth_status relation:rendered support:ui");
                     2
                 }
+            },
+            Err(err) => {
+                eprintln!("error: {err}");
+                eprintln!();
+                eprintln!("trace queries use a small DSL. Example:");
+                eprintln!("  kgrep trace subject:auth_status relation:rendered support:ui");
+                2
             }
-        }
+        },
     };
 
     peak::report_if_requested();
