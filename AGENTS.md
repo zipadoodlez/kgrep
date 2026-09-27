@@ -208,69 +208,111 @@ and a new caller would reintroduce the bug jcode already fixed.
 
 ## The roadmap
 
-Each stage is independently useful and must not raise peak memory. Exit criteria
-are stated so a stage ends in evidence rather than opinion.
+The goal in one line: **beat agentgrep on tokens and latency, at a comparable or
+better footprint, or conclude that we cannot and stop.** Every stage ends in
+evidence, and every stage must be independently useful.
 
-### Stage 1 — the bounded packet (next)
+A stage is two to four sessions of work. Order matters where noted, and the
+reasons are stated so a later reader can disagree with them on the merits.
 
-- Move the output cap into the library default: bounded unless asked otherwise.
-- Budget in tokens; rank before spending; cut detail before coverage; keep the
-  true totals; add an unbounded opt-out.
-- Needs the grep relevance score, which is open question number one. A first cut
-  can reuse `find`'s signal set, which also unifies the two verbs' ranking.
-- **Exit:** recall does not regress on the bench, maximum output falls by an order
-  of magnitude on generic queries, and peak RSS stays under the declared ceiling
-  in `memcheck`.
+### Stage 1 — bound the packet, in parallel (next)
+
+Three things, in this order, because the first informs the second and the second
+must not be built twice.
+
+**1a. Declare the numbers.** We have never measured peak RSS on a real repo, so
+"under the ceiling" currently means nothing. Run `scripts/memcheck.sh` against
+kcode, record the baseline, and pick a ceiling, for example baseline plus a
+stated index allowance. Cheap, and it makes every later claim checkable.
+
+**1b. Decide the ranking signal.** This is the one genuinely open design
+question and it blocks the rest. "Rank before spending" is meaningless without a
+score, and grep has none today. Run a small experiment: score hits by a few cheap
+signals (does the match land in a symbol's *label*; how many matches the file has,
+as a proxy for specificity; file role) and measure whether tokens-to-answer
+improves on the 17 tasks. A null result is a real outcome and changes the design,
+for example bounding by file count instead of rank.
+
+**1c. Build the bounded packet and the parallel scan together.** Token-denominated
+budget; rank, then spend; cut detail before coverage; keep true totals; an
+explicit unbounded opt-out. Parallel workers over the file list, each holding a
+bounded top-K, merged at the end. These two are one change, not two: parallel
+workers cannot feed a single-pass bound without per-worker heaps, so doing the
+bound first means doing it again.
+
+- **Exit:** recall stays 17/17; tokens-to-answer on the two generic queries falls
+  by at least 5x; latency is at or below agentgrep's 30 ms median; peak RSS is
+  under the declared ceiling.
+- **Why now:** it is the differentiator, it is measurable today, and it repairs
+  the latency regression in the same stroke.
 
 ### Stage 2 — four verbs on one core
 
-- Port `find` and `trace` onto the same shaper. Ranking lands here properly.
+Port `find` and `trace` onto the shaper. Required before the swap, and it is where
+ranking lands properly for the other three verbs.
+
 - **Exit:** all four verbs implemented and covered by the benchmark.
 
-### Stage 3 — honest measurement
+### Stage 3 — make the measurement absolute
 
-- A harness-faithful bench binary that links agentgrep `v0.1.6` and calls
-  `run_grep` + `render_grep_output(Some(200))`, so the oracle mirrors what a model
-  actually sees.
-- Differential parity on the edges: non-UTF-8 names, symlinks, globs, glob+type,
-  extension-less files. Document deliberate differences rather than hiding them.
-- Fix the non-UTF-8 round-trip so `outline` accepts what `grep` emits.
+The CLI harness is fine for relative A/B, which is all Stage 1 needs, because the
+two tools are measured the same way. It is not fine for claims about what a model
+sees. A bench binary that links agentgrep `v0.1.6` and calls `run_grep` +
+`render_grep_output(Some(200))` is the honest oracle.
+
+Also here: differential parity against agentgrep on the edges (non-UTF-8 names,
+symlinks, globs, glob+type, extension-less files), and fixing the non-UTF-8
+round-trip so `outline` accepts what `grep` emits.
+
 - **Exit:** parity on UTF-8 corpora, deliberate differences written down, and the
   benchmark measuring the harness path.
 
 ### Stage 4 — real structure
 
-- Adopt `ast-grep-core` and `ast-grep-language` (skip `ast-grep-config`), with a
-  small query file per language. Keep the line-based scanner as the fallback for
-  languages with no grammar.
-- This is where nesting and zoom arrive, and it costs no resident memory.
-- **Exit:** nested structure available; outline more accurate; bench unchanged or
-  better.
+Adopt `ast-grep-core` and `ast-grep-language` (skip `ast-grep-config`), with a
+small query file per language. Keep the line-based scanner as the fallback for
+languages without a grammar. This is where nesting and zoom arrive at no resident
+cost.
+
+- **Exit:** nested structure available; outline more accurate; tokens and latency
+  no worse.
 
 ### Stage 5 — harness state as a source
 
-- What the agent has already read, what changed since the last call, where the
-  user is working. Nearly free, and it is the one advantage an in-harness tool has
-  that no external tool can match. agentgrep touches it with `context.json`.
-- **Exit:** answers visibly improve on tasks where prior reading is relevant.
+What the agent has already read, what changed since the last call, where the user
+is working. Nearly free, and the one advantage an in-harness tool has that no
+external tool can match. agentgrep touches it with `context.json`.
+
+- **Exit:** measurable improvement on tasks where prior reading is relevant.
 
 ### Stage 6 — resolution, the largest capability gap
 
-- "What uses this" and "what implements this", the questions an agent needs before
-  editing. Consume via MCP if a language server is already running; otherwise
-  name-based resolution over our own structure.
+"What uses this" and "what implements this", the questions an agent needs before
+editing. Consume via MCP if a language server is already running; otherwise
+name-based resolution over our own structure. This is the bet the whole project
+rests on, and it is deliberately late because it is the riskiest.
+
 - **Exit:** a references verb whose precision is good enough to act on.
 
 ### Stage 7 — the graph, last and optional
 
-- An mmapped artifact answering only the architectural questions: what is central,
-  what clusters, how things link. Only if it earns its place after 1-6.
+An mmapped artifact answering only the architectural questions: what is central,
+what clusters, how things link. Only if it earns its place after 1 through 6.
+
 - **Exit:** it answers something the earlier stages cannot, at no resident cost.
 
-### Then, and only then, the swap
+### Gate — the swap
 
-Point kcode at graphgrep. Requires parity, attribution, and a clean consumer
-build.
+Point kcode at this. Blocked on: parity (Stage 3), attribution written, and a
+clean consumer build. The name should be settled by here, because kcode's tool
+names are what the model sees.
+
+### Stop condition
+
+If after Stage 1 the tokens do not improve measurably, or the improvement does not
+survive Stage 3's honest oracle, the honest move is to keep agentgrep, contribute
+the fixes upstream if they will take them, and spend the effort on the harness
+instead. Deciding that early is a win, not a failure.
 
 ### Not doing
 
