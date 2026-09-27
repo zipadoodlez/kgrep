@@ -5,7 +5,7 @@ sources. Confidence is marked: **verified** means a primary source (vendor doc,
 engineering blog, or repo) says it; **partial** means a secondary source or a
 reasonable inference; **unverified** means we could not confirm it.
 
-This matters because graphgrep's design leans on a layered retrieval model, and
+This matters because kgrep's design leans on a layered retrieval model, and
 the industry has independently converged on the same layers.
 
 ## The layers, and who uses each
@@ -197,7 +197,7 @@ buffers.
 2. ctags consumption, nearly free, real go-to-definition
 3. LSP only via MCP when a server is already present, never bundled or installed
 
-## What this means for graphgrep
+## What this means for kgrep
 
 1. **The layered model is the industry consensus, not our invention.** VS Code
    publishes nearly our exact taxonomy: lexical grep, glob, symbol-level

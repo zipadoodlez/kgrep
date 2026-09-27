@@ -1,7 +1,7 @@
 use clap::Parser;
-use graphgrep::cli::{Cli, Command};
-use graphgrep::model::Budget;
-use graphgrep::{lexical, outline, packet, peak};
+use kgrep::cli::{Cli, Command};
+use kgrep::model::Budget;
+use kgrep::{lexical, outline, packet, peak};
 use std::path::PathBuf;
 
 fn resolve_root(path: &Option<String>) -> PathBuf {

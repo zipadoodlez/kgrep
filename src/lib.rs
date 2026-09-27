@@ -1,4 +1,4 @@
-//! graphgrep: code search and retrieval for agents.
+//! kgrep: code search and retrieval for agents.
 //!
 //! One shaper, several sources, flat memory. See `AGENTS.md` for the shape and
 //! the reasoning; this crate is that design, not a plan for it.

@@ -74,7 +74,7 @@ non-UTF-8 path parsing. In v0.1.6 the `rg` path and its parsing is about 560
 lines, and the v0.1.7 release is largely parity fixes. Their own release notes
 call it the "parity swarm".
 
-**Fix:** one searcher. Already done in graphgrep.
+**Fix:** one searcher. Already done in kgrep.
 
 ### 7. The structure sketch is approximate and flat
 

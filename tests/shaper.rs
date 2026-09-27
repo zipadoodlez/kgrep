@@ -1,8 +1,8 @@
 //! The shaper end to end: choose files, match, group, packet.
 
-use graphgrep::cli::{GrepArgs, OutlineArgs, ScopeArgs};
-use graphgrep::model::Budget;
-use graphgrep::{lexical, outline};
+use kgrep::cli::{GrepArgs, OutlineArgs, ScopeArgs};
+use kgrep::model::Budget;
+use kgrep::{lexical, outline};
 use std::fs;
 use std::path::Path;
 

@@ -1,4 +1,8 @@
-# graphgrep (working name)
+# kgrep
+
+The `k` is for kcode, the one harness this is built for. Checked before adopting:
+free on crates.io, and no meaningful incumbent (the GitHub hits top out at seven
+stars, and are a log searcher, a k-mer grep, and a Kubernetes grep).
 
 One shaper for how an agent finds its way around a codebase, built to spend
 tokens and latency well and to keep memory inside a declared ceiling.
@@ -125,7 +129,7 @@ The budget rules, learned from the benchmark and from reading agentgrep:
 | `outline.rs` | absorbed structure extraction plus the `outline` verb |
 | `lexical.rs` | absorbed grep, reshaped, bounded, `rg` path dropped |
 | `packet.rs` | text and JSON rendering, matching agentgrep's JSON shape |
-| `peak.rs` | peak RSS reporting behind `GRAPHGREP_PEAK_RSS` |
+| `peak.rs` | peak RSS reporting behind `KGREP_PEAK_RSS` |
 | `main.rs` | wires `grep` and `outline`; `find` and `trace` still exit 2 |
 
 Tooling that exists and works:
@@ -142,7 +146,7 @@ Known gaps in the code, honestly:
 - The output cap is a match count, not a token budget, and is not yet the default.
 - Non-UTF-8 display paths use a simpler `#raw=hex` suffix than agentgrep's `#b=`
   scheme, and `outline` cannot yet resolve a path carrying it, so agentgrep's
-  round-trip contract does not hold in graphgrep.
+  round-trip contract does not hold in kgrep.
 - The benchmark drives the CLI, which is not the path kcode uses. It needs a
   harness-faithful oracle.
 
@@ -173,9 +177,8 @@ Open, and genuinely unknown:
 - **Does structural ranking actually improve answers?** Testable once the AST
   source exists. Currently an assumption, and it is the assumption Stage 4 rests
   on.
-- **The name.** `graphgrep` names a source we demoted. Every dictionary word
-  checked is taken on crates.io, and `treegrep`/`agrep` collide in the same
-  namespace. Unresolved.
+- **How the name ages.** `kgrep` is anchored to kcode, which is meaningful only
+  while kcode is the sole consumer. That is a deliberate trade, not an oversight.
 - **Graph freshness policy.** How stale is too stale, if the artifact is built.
 
 ## What we have measured
@@ -186,7 +189,7 @@ native fallback.
 | tool | recall | median tok→ans | p90 | max output tok |
 |---|---|---|---|---|
 | agentgrep 0.1.6 | 17/17 | 383 | 1,762 | 154,351 |
-| graphgrep | 17/17 | 383 | 1,762 | 154,356 |
+| kgrep | 17/17 | 383 | 1,762 | 154,356 |
 
 What holds:
 
@@ -194,7 +197,7 @@ What holds:
   it" is not a case for anything.
 - **Specific queries are already good**, at a median of 383 tokens to the answer.
   That is the bar to beat.
-- **graphgrep tracks agentgrep to within one token per task**, which is what
+- **kgrep tracks agentgrep to within one token per task**, which is what
   faithful absorption looks like.
 
 What was retracted: the 154k-token maximum is a **CLI-only** artifact. jcode calls
@@ -401,7 +404,7 @@ miss:
 - It feeds `context.json` for familiarity, which is the seam stage 5 grows from.
 
 **kcode is in scope to refactor**, bounded to that integration site. **No
-dependency swap until graphgrep is done and tested.**
+dependency swap until kgrep is done and tested.**
 
 ## Layout
 
@@ -429,7 +432,7 @@ cargo test             # unit + integration tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 
-scripts/bench.py --bin target/release/graphgrep --corpus ~/kcode
+scripts/bench.py --bin target/release/kgrep --corpus ~/kcode
 scripts/memcheck.sh    # small by default; pass sizes to make it bigger
 ```
 
@@ -478,12 +481,12 @@ Settled by decision, not by evidence:
   for rewriting, so the gate is real.
 - **Supersede agentgrep, and send the obviously-correct fixes upstream first.**
 
-Open: the name. The grep relevance score. The default token budget. Graph
-freshness. Whether cross-file edits follow resolution.
+Open: the default token budget. Graph freshness. Whether cross-file edits follow
+resolution. The grep relevance constants, which are borrowed rather than tuned.
 
 ## Attribution
 
 Neither upstream is ours. agentgrep is MIT (`1jehuang`); graphify is Apache-2.0
 (`Safi Shamsi and the Graphify contributors`). Absorbing agentgrep's source makes
-graphgrep a derivative work of it, so its notice is owed. Deferred by choice, but
+kgrep a derivative work of it, so its notice is owed. Deferred by choice, but
 it must land before release or before kcode points at this.

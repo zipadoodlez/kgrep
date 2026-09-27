@@ -25,7 +25,7 @@ and honest about being an approximation. Character counts are exact.
 ```bash
 scripts/bench.py \
   --bin <agentgrep-binary> \
-  --bin target/release/graphgrep \
+  --bin target/release/kgrep \
   --corpus ~/kcode \
   --json bench/baseline.json
 ```
@@ -45,7 +45,7 @@ reported a flat 13.7 MB for every query and both binaries. That was the wrapper:
 a forked parent shares its pages with the child, so the wrapper's own footprint
 lands in the child's peak. `posix_spawn` plus `wait4` is better but still
 inflated (11,676 KB where the tool reports 5,460 KB). Only the tool's own
-high-water mark is trustworthy, so only graphgrep can currently be measured this
+high-water mark is trustworthy, so only kgrep can currently be measured this
 way.
 
 **kcode, 1,234 tracked files:**
@@ -104,7 +104,7 @@ an earlier run was contended and had to be discarded.
 | tool | recall | median tok→ans | p90 | max out tok | median latency | p95 |
 |---|---|---|---|---|---|---|
 | agentgrep 0.1.6 | 17/17 | 383 | 1,762 | 154,351 | 30.3 ms | 44.2 ms |
-| graphgrep | 17/17 | 383 | 1,762 | 154,356 | 64.3 ms | 100.7 ms |
+| kgrep | 17/17 | 383 | 1,762 | 154,356 | 64.3 ms | 100.7 ms |
 
 Latency is per call, including process start-up, which a harness calling
 in-process does not pay. So these overstate what kcode sees and are best read as
@@ -116,20 +116,20 @@ latency gap is unchanged, so it is not caused by output size.
 
 ## The latency finding, and it is my regression
 
-Tokens and recall are identical, and graphgrep is **2.2x slower** on grep while
+Tokens and recall are identical, and kgrep is **2.2x slower** on grep while
 matching exactly on outline. The cause was guessed and then verified rather than
 asserted. Best of five runs, `grep webfetch` over kcode, 8 cores available:
 
 | | all cores | pinned to one core (`taskset -c 0`) |
 |---|---|---|
 | agentgrep 0.1.6 | 21 ms | 89 ms |
-| graphgrep | 71 ms | 84 ms |
+| kgrep | 71 ms | 84 ms |
 
 Two things fall out:
 
-1. **agentgrep gets a 4.2x speedup from parallelism**; graphgrep does not move,
+1. **agentgrep gets a 4.2x speedup from parallelism**; kgrep does not move,
    because it is serial. So parallelism is the entire cause.
-2. **Single-threaded, graphgrep is slightly faster** (84 ms versus 89 ms), which
+2. **Single-threaded, kgrep is slightly faster** (84 ms versus 89 ms), which
    is roughly the few milliseconds agentgrep spends trying to spawn `rg` before
    falling back. The absorbed serial work is therefore on par or better, and the
    regression is exactly one missing thing: the threaded scan.
@@ -158,7 +158,7 @@ measured against the same 17 tasks, with recall unchanged at 17/17 throughout:
 | **all** | **100.8** | **703.8** |
 
 `all` is **3.8x better on the median and 2.5x better on p90**, at no measurable
-latency cost (52.5 ms versus 52.7 ms). Adopted as the default; `GRAPHGREP_RANK=none`
+latency cost (52.5 ms versus 52.7 ms). Adopted as the default; `KGREP_RANK=none`
 restores path order as the control.
 
 **A signal that sounds sensible hurts on its own.** Specificity, meaning "prefer
@@ -222,7 +222,7 @@ harness-faithful path is required before any claim about what the model sees.
 **4. The mean is still a lie.** Even where outliers are real, a mean dominated by
 two tasks misrepresents the distribution. Median and p90 belong in the report.
 
-**5. graphgrep matches agentgrep to within one token per task**, which is what
+**5. kgrep matches agentgrep to within one token per task**, which is what
 absorption should look like and is the first evidence the port is faithful.
 
 ## Where the guard actually lives

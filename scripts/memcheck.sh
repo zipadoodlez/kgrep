@@ -22,14 +22,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 cargo build --release --quiet
-BIN=./target/release/graphgrep
+BIN=./target/release/kgrep
 
 # A query that matches nothing, so the measurement is the walk itself.
 NULL_QUERY="zzz_never_present_token_zzz"
 
 measure() { # measure <root> <args...>
   local root="$1"; shift
-  ( cd "$root" && GRAPHGREP_PEAK_RSS=1 "$OLDPWD/$BIN" "$@" 2>&1 >/dev/null \
+  ( cd "$root" && KGREP_PEAK_RSS=1 "$OLDPWD/$BIN" "$@" 2>&1 >/dev/null \
     | awk '/^peak_rss_kb:/{print $2}' )
 }
 

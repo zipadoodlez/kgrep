@@ -1,5 +1,5 @@
 [package]
-name = "graphgrep"
+name = "kgrep"
 version = "0.1.0"
 edition = "2024"
 description = "Code search and retrieval for agents: lexical and structural"

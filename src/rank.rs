@@ -9,9 +9,9 @@
 //! produced: the path, the match count, the file role, and the symbols the
 //! file declares. Nothing here needs a parse or a second pass over the corpus.
 //!
-//! Enabled by `GRAPHGREP_RANK`. The default is `All`, because the experiment in
+//! Enabled by `KGREP_RANK`. The default is `All`, because the experiment in
 //! `bench/README.md` measured it at 3.8x better on median tokens-to-answer than
-//! path order, with recall unchanged. `GRAPHGREP_RANK=none` restores the old
+//! path order, with recall unchanged. `KGREP_RANK=none` restores the old
 //! behaviour and is the control for further experiments.
 
 use crate::model::Hit;
@@ -33,12 +33,12 @@ pub enum Ranking {
 }
 
 impl Ranking {
-    /// Read the variant from `GRAPHGREP_RANK`, defaulting to `All`.
+    /// Read the variant from `KGREP_RANK`, defaulting to `All`.
     ///
     /// An unknown value falls back to the default rather than erroring, because
     /// this is a measurement knob and a typo should not break a search.
     pub fn from_env() -> Self {
-        match std::env::var("GRAPHGREP_RANK").as_deref() {
+        match std::env::var("KGREP_RANK").as_deref() {
             Ok("none") => Ranking::None,
             Ok("path") => Ranking::Path,
             Ok("symbol") => Ranking::Symbol,

@@ -7,7 +7,7 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, Parser)]
 #[command(
-    name = "graphgrep",
+    name = "kgrep",
     version,
     about = "Code search and retrieval for agents"
 )]
