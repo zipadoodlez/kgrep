@@ -73,7 +73,16 @@ pub fn run_outline(root: &Path, args: &OutlineArgs) -> Result<OutlineResult, Str
 
 /// Resolve the outline target: verbatim if it exists, else the unique
 /// unambiguous match by file name anywhere under the root.
+///
+/// A path carrying our `#raw=<hex>` suffix is decoded first, so a path printed
+/// by `grep` or `find` for a name that is not valid UTF-8 can be handed straight
+/// back to `outline`. Without this the round-trip an agent naturally performs,
+/// search then read, fails for exactly the files whose names are hardest to
+/// retype.
 fn resolve_outline_path(root: &Path, file: &str) -> PathBuf {
+    if let Some(decoded) = decode_raw_suffix(root, file) {
+        return decoded;
+    }
     let direct = root.join(file);
     if direct.exists() {
         return direct;
@@ -86,6 +95,43 @@ fn resolve_outline_path(root: &Path, file: &str) -> PathBuf {
         Some(path) => path,
         None => direct,
     }
+}
+
+/// Decode a display path carrying the `#raw=<hex>` suffix back to real bytes.
+///
+/// Returns `None` when there is no suffix, or the hex is malformed, so the
+/// caller falls through to ordinary resolution.
+fn decode_raw_suffix(root: &Path, file: &str) -> Option<PathBuf> {
+    let (_, hex) = file.rsplit_once("#raw=")?;
+    let bytes = decode_hex(hex)?;
+    if bytes.is_empty() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = root.join(std::ffi::OsStr::from_bytes(&bytes));
+        path.exists().then_some(path)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = root;
+        None
+    }
+}
+
+#[cfg(unix)]
+fn decode_hex(hex: &str) -> Option<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    let bytes = hex.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.chunks(2) {
+        let value = std::str::from_utf8(pair).ok()?;
+        out.push(u8::from_str_radix(value, 16).ok()?);
+    }
+    Some(out)
 }
 
 fn unique_name_match(root: &Path, file: &str) -> Option<PathBuf> {

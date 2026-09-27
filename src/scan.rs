@@ -246,4 +246,3 @@ pub fn path_bytes_hex(raw: &[u8]) -> String {
     }
     out
 }
-

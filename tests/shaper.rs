@@ -469,7 +469,10 @@ fn a_symlinked_directory_is_seen_the_same_way_by_both_walkers() {
          directory: {:?} versus {:?}",
         collected.len(),
         packet.hits.len(),
-        collected.iter().map(|e| &e.relative_path).collect::<Vec<_>>(),
+        collected
+            .iter()
+            .map(|e| &e.relative_path)
+            .collect::<Vec<_>>(),
         packet.hits.iter().map(|h| &h.path).collect::<Vec<_>>()
     );
 }
@@ -494,6 +497,47 @@ fn trace_args(terms: &[&str]) -> TraceArgs {
         debug_score: false,
         context_json: None,
     }
+}
+
+#[test]
+fn outline_accepts_the_path_grep_printed_for_an_odd_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(root, "src/real.rs", "// placeholder\n");
+    write(root, "src/odd.rs", "pub fn findable() {}\n// ODDTOKEN\n");
+
+    // Give the file a name that is not valid UTF-8, so grep has to print the
+    // disambiguated form.
+    let odd = root.join("src/odd.rs");
+    use std::os::unix::ffi::OsStringExt;
+    let mut bytes = odd.as_os_str().to_owned().into_vec();
+    bytes.insert(bytes.len() - 3, 0xff);
+    let renamed = root.join(std::ffi::OsString::from_vec(bytes));
+    std::fs::rename(&odd, &renamed).unwrap();
+
+    let packet = lexical::run_grep(root, &grep_args(root, "ODDTOKEN", false), Budget::default())
+        .expect("grep runs");
+    let printed = packet.hits[0].path.clone();
+    assert!(
+        printed.contains("#raw="),
+        "the display path should carry the raw suffix, got {printed:?}"
+    );
+
+    // Hand it straight back, which is what an agent does next.
+    let args = OutlineArgs {
+        file: printed.clone(),
+        scope: scope(root),
+        json: false,
+        max_items: None,
+        context_json: None,
+    };
+    let outlined = outline::run_outline(root, &args)
+        .unwrap_or_else(|err| panic!("outline should accept {printed:?}: {err}"));
+    assert!(
+        outlined.items.iter().any(|item| item.label == "findable"),
+        "the decoded file should be the one grep found, got {:?}",
+        outlined.items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
 }
 
 #[test]
