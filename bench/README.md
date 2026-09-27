@@ -101,18 +101,33 @@ force out. Re-measure after Stage 1c and tighten or confirm.
 (native versus native, an honest comparison). Measured on a quiet machine after
 an earlier run was contended and had to be discarded.
 
-| tool | recall | median tok→ans | p90 | max out tok | median latency | p95 |
-|---|---|---|---|---|---|---|
-| agentgrep 0.1.6 | 17/17 | 383 | 1,762 | 154,351 | 30.3 ms | 44.2 ms |
-| kgrep | 17/17 | 383 | 1,762 | 154,356 | 64.3 ms | 100.7 ms |
+**At absorption, before ranking existed.** This is the parity evidence: the port
+reproduced agentgrep's output to within a token per task.
+
+| tool | recall | median tok→ans | p90 | max out tok |
+|---|---|---|---|---|
+| agentgrep 0.1.6 | 17/17 | 383 | 1,762 | 154,351 |
+| kgrep (path order) | 17/17 | 383 | 1,762 | 154,356 |
+
+**Now, with ranked output as the default.** This is the current standing, and the
+first number in the project that is actually better than agentgrep's:
+
+| tool | recall | median tok→ans | p90 | median latency |
+|---|---|---|---|---|
+| agentgrep 0.1.6 | 17/17 | 383.2 | 1,762.5 | 18.6 ms |
+| kgrep (ranked) | 17/17 | **100.8** | **703.8** | 50.3 ms |
+
+So: **3.8x better on median tokens to the answer, 2.5x better on p90, and 2.7x
+slower.** Tokens are the objective and latency is the other half of it, so this is
+a real win and not yet a finished one. The latency gap is the missing parallelism,
+measured at 4.2x on its own, and it is Stage 1c along with the packet bound.
 
 Latency is per call, including process start-up, which a harness calling
 in-process does not pay. So these overstate what kcode sees and are best read as
 an upper bound and as a relative comparison between the two tools.
 
-Excluding the two deliberately generic queries (`grep-swarm-stress`,
-`grep-todo-stress`), tokens to answer are 379 median for both tools, while the
-latency gap is unchanged, so it is not caused by output size.
+The maximum output column is unchanged between the two tools because neither
+bounds its output yet. That is Stage 1c as well.
 
 ## The latency finding, and it is my regression
 
