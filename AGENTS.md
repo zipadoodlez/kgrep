@@ -30,7 +30,7 @@ be allowed in.
 | Tag index | where is X defined | one mmapped file | not started |
 | mmapped n-gram index | fast regex on huge repos | mmapped, evictable | not started |
 | Harness state | what the agent read, what changed | nearly free | partial, in agentgrep |
-| Resolution (LSP via MCP) | who uses this | never ours to run | not started |
+| Resolution (ours, approximate) | who might use this | bounded index | not started |
 | Graph | what is central, what clusters | optional artifact | not started |
 
 The shaper is ours and is the product. The sources are interchangeable.
@@ -308,20 +308,23 @@ external tool can match. agentgrep touches it with `context.json`.
 
 - **Exit:** measurable improvement on tasks where prior reading is relevant.
 
-### Stage 7 — resolution, and the gate on cross-file edits
+### Stage 7 — resolution, approximate and ours
 
-"What uses this" and "what implements this", the questions an agent needs before
-editing. Consume via MCP if a language server is already running; otherwise
-name-based resolution over our own structure.
+"What uses this", answered by name-based resolution over our own index: which
+symbols share a name, which imports bring that name into scope, which files could
+plausibly refer to it. Good for reading, and useful as a ranking signal.
 
-This stage is also **the gate on the expensive tier of editing**: rename across
-the codebase, safe delete, move. Approximate resolution is fine for ranking and
-fatal for rewriting, so those operations wait on evidence that resolution is
-exact. If it is, they become a small addition. If it is not, they were never
-possible and the question closes itself.
+**This is deliberately approximate, so it is not safe for rewriting.** The exact
+tier, meaning cross-file rename, find-implementations across inheritance, and type
+hierarchy, needs compiler-accurate resolution, and this project does not drive a
+language server. So that tier is out of scope, and the gate on cross-file edits
+is expected to stay closed.
 
-- **Exit:** a references verb whose precision is good enough to act on, and a
-  decision on whether cross-file edits follow.
+The shape of the product follows: a retrieval tool with safe local edits, not a
+refactoring engine.
+
+- **Exit:** a references verb that is useful to read, with its imprecision stated
+  in the output rather than hidden.
 
 ### Stage 8 — the graph artifact, last and optional
 
@@ -355,10 +358,15 @@ instead. Deciding that early is a win, not a failure.
 
 ### Not doing
 
-Language servers in-process, embedding models, vector stores, installers, hooks
-managers, editors, MCP/HTTP servers, watch mode, HTML/canvas/SVG/wiki exporters,
-media or document ingest, cross-file rewriting (gated on Stage 7's evidence), and
-any resident structure proportional to repository size.
+Language servers in-process, a language-server integration of our own, depending
+on or recommending a third-party wrapper such as Serena, embedding models, vector
+stores, installers, hooks managers, editors, MCP/HTTP servers of our own, watch
+mode, HTML/canvas/SVG/wiki exporters, media or document ingest, cross-file
+rewriting, and any resident structure proportional to repository size.
+
+Note on MCP: kcode already supports arbitrary MCP servers as a client, so a user
+who wants a language server can configure one without anything from us. That is a
+kcode feature, not ours, and it is why nothing is lost by dropping it here.
 
 ## Consumers and the kcode seam
 
@@ -446,6 +454,11 @@ Settled by decision, not by evidence:
 - **One consumer: kcode only.** No MCP server, no third-party CLI contract, and
   kcode's integration site and tool names are ours to change. This is why
   harness state is a real advantage rather than a theoretical one.
+- **No Serena, and no language-server wrapper of our own.** We rewrite the cheap
+  tier ourselves: outline and symbols, a name index, symbol-scoped edits, and
+  approximate references. We accept losing the exact tier, meaning cross-file
+  rename, find-implementations, and type hierarchy, because that needs
+  compiler-accurate resolution that only a language server provides.
 - **The graph is a signal, not a product.** Its value lands in Stage 4 as ranking
   and zoom over the shaper. The separate artifact is Stage 8 and may not earn its
   place.
