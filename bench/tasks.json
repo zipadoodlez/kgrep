@@ -1,0 +1,107 @@
+{
+  "//": "Navigation tasks with verified ground truth. Every expect_path was checked to exist and every expect_symbol was checked to be a real definition in that file. The question is what an agent would ask; args is the tool call we measure, because we are measuring the tool, not the model.",
+  "tasks": [
+    {
+      "id": "grep-tool-alias",
+      "question": "Where does a model-facing name like grep get resolved onto the real search tool?",
+      "args": ["grep", "resolve_tool_name"],
+      "expect_path": "crates/jcode-tool-core/src/lib.rs"
+    },
+    {
+      "id": "grep-mcp-tool",
+      "question": "Where is the request that calls an MCP server tool?",
+      "args": ["grep", "mcp_call"],
+      "expect_path": "crates/jcode-app-core/src/tool/mcp.rs"
+    },
+    {
+      "id": "grep-session-search",
+      "question": "Where is past sessions searched or indexed?",
+      "args": ["grep", "session_search"],
+      "expect_path": "crates/jcode-app-core/src/tool/session_search_index.rs"
+    },
+    {
+      "id": "grep-config-flag",
+      "question": "Where is the config flag that controls showing full search output?",
+      "args": ["grep", "show_agentgrep_output"],
+      "expect_path": "crates/jcode-config-types/src/display.rs"
+    },
+    {
+      "id": "grep-harness-context",
+      "question": "Where is the harness familiarity context turned into exposure for the search tool?",
+      "args": ["grep", "collect_agentgrep_exposure"],
+      "expect_path": "crates/jcode-app-core/src/tool/agentgrep/context.rs"
+    },
+    {
+      "id": "grep-destructive-gate",
+      "question": "Where is the guard that blocks destructive shell commands?",
+      "args": ["grep", "destructive"],
+      "expect_path": "crates/jcode-app-core/src/tool/bash_destructive_gate.rs"
+    },
+    {
+      "id": "grep-apply-patch",
+      "question": "Where is the apply_patch tool implemented?",
+      "args": ["grep", "apply_patch"],
+      "expect_path": "crates/jcode-app-core/src/tool/apply_patch.rs"
+    },
+    {
+      "id": "grep-provider-catalog",
+      "question": "Where are OpenAI-compatible provider profile env vars applied?",
+      "args": ["grep", "apply_openai_compatible_profile_env"],
+      "expect_path": "crates/jcode-base/src/provider_catalog.rs"
+    },
+    {
+      "id": "grep-context-window",
+      "question": "Where is a model's context window limit computed?",
+      "args": ["grep", "context_limit_for_model_with_provider_and_cache"],
+      "expect_path": "crates/jcode-provider-core/src/models.rs"
+    },
+    {
+      "id": "grep-webfetch",
+      "question": "Where is the webfetch tool implemented?",
+      "args": ["grep", "webfetch"],
+      "expect_path": "crates/jcode-app-core/src/tool/webfetch.rs"
+    },
+    {
+      "id": "grep-swarm-stress",
+      "question": "Where is swarm coordination implemented? (a generic term that appears widely, so ranking matters)",
+      "args": ["grep", "swarm"],
+      "expect_path": "crates/jcode-app-core/src/tool/communicate.rs"
+    },
+    {
+      "id": "grep-todo-stress",
+      "question": "Where is the todo tool implemented? (a generic term that appears widely, so ranking matters)",
+      "args": ["grep", "todo"],
+      "expect_path": "crates/jcode-app-core/src/tool/todo.rs"
+    },
+    {
+      "id": "outline-tool-core",
+      "question": "Show me the symbols in the tool-name resolution file.",
+      "args": ["outline", "crates/jcode-tool-core/src/lib.rs"],
+      "expect_symbol": "resolve_tool_name"
+    },
+    {
+      "id": "outline-models",
+      "question": "Show me the symbols in the provider model table.",
+      "args": ["outline", "crates/jcode-provider-core/src/models.rs"],
+      "expect_symbol": "context_limit_for_model_with_provider_and_cache"
+    },
+    {
+      "id": "outline-provider-catalog",
+      "question": "Show me the symbols in the provider catalog.",
+      "args": ["outline", "crates/jcode-base/src/provider_catalog.rs"],
+      "expect_symbol": "apply_openai_compatible_profile_env"
+    },
+    {
+      "id": "outline-agentgrep-tool",
+      "question": "Show me the symbols in the search tool wrapper.",
+      "args": ["outline", "crates/jcode-app-core/src/tool/agentgrep.rs"],
+      "expect_symbol": "run_agentgrep_blocking"
+    },
+    {
+      "id": "outline-harness-context",
+      "question": "Show me the symbols in the harness context file.",
+      "args": ["outline", "crates/jcode-app-core/src/tool/agentgrep/context.rs"],
+      "expect_symbol": "collect_agentgrep_exposure"
+    }
+  ]
+}
