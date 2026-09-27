@@ -151,6 +151,10 @@ The graph is that walk with the links filled in.
 
 ## Build order
 
+> **Superseded by the roadmap in `AGENTS.md`**, which is authoritative and has
+> exit criteria. Kept here because the reasoning below still explains why the
+> order is what it is.
+
 Do not build the unified walk or the graph first. Each earlier step must be
 independently useful and must not raise peak memory.
 
