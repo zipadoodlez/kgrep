@@ -57,10 +57,22 @@ latency gap is unchanged, so it is not caused by output size.
 ## The latency finding, and it is my regression
 
 Tokens and recall are identical, and graphgrep is **2.2x slower** on grep while
-matching exactly on outline. The cause is known and it is mine: agentgrep's
-native path is **threaded** (`thread::scope`, one worker per core chunking the
-file list), and when this project dropped the `rg` fast path it dropped the
-threading with it. The absorbed `lexical.rs` scans serially.
+matching exactly on outline. The cause was guessed and then verified rather than
+asserted. Best of five runs, `grep webfetch` over kcode, 8 cores available:
+
+| | all cores | pinned to one core (`taskset -c 0`) |
+|---|---|---|
+| agentgrep 0.1.6 | 21 ms | 89 ms |
+| graphgrep | 71 ms | 84 ms |
+
+Two things fall out:
+
+1. **agentgrep gets a 4.2x speedup from parallelism**; graphgrep does not move,
+   because it is serial. So parallelism is the entire cause.
+2. **Single-threaded, graphgrep is slightly faster** (84 ms versus 89 ms), which
+   is roughly the few milliseconds agentgrep spends trying to spawn `rg` before
+   falling back. The absorbed serial work is therefore on par or better, and the
+   regression is exactly one missing thing: the threaded scan.
 
 This is the first evidence for measuring three axes rather than one. On tokens
 and recall the two tools are indistinguishable, and the entire difference is
