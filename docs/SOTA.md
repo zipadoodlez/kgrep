@@ -10,17 +10,16 @@ the industry has independently converged on the same layers.
 
 ## The layers, and who uses each
 
-| Layer | Claude Code | Cursor | GitHub Copilot / VS Code | Aider | Sourcegraph Cody / Amp | Serena (MCP) |
-|---|---|---|---|---|---|---|
-| Lexical scan (ripgrep) | yes, verified | yes, verified | yes, verified | yes, partial | yes, partial | yes (regex tool) verified |
-| Trigram / n-gram regex index | no, not found | yes, verified | yes (Blackbird), verified | no | yes (Zoekt), verified | no |
-| Vector embeddings ("semantic") | no, not found | yes, verified | yes, verified | no | yes, verified | no |
-| tree-sitter | no, not found | yes (AST chunking), verified | "language intelligence", partial | yes, verified | "search-based nav", verified | no |
-| ctags / tag index | no | no | no | no | named as the classic baseline | no |
-| LSP (language server) | no, not found | no, not found | yes ("usages"), verified | no | no | yes, verified |
-| SCIP / static code-intel index | no | no | no | no | yes (they invented SCIP), verified | no |
-| Symbol graph + PageRank | no | no | no | yes, verified | no | no (uses LSP instead) |
-| Content hashing for freshness | no | yes (Merkle tree), verified | index managed server-side | no | commit-level consistency | n/a |
+| Layer | Claude Code | Cursor | Copilot / VS Code | Aider | Sourcegraph | opencode | Serena |
+|---|---|---|---|---|---|---|---|
+| Lexical scan (ripgrep) | yes, verified | yes, verified | yes, verified | yes, partial | yes, partial | yes, partial | yes (regex tool), verified |
+| Trigram / n-gram regex index | no | yes, verified | yes (Blackbird), verified | no | yes (Zoekt), verified | no | no |
+| Vector embeddings | no | yes, verified | yes, verified | no | yes, verified | no | no |
+| tree-sitter | no | yes (chunking), verified | "language intelligence", partial | yes, verified | "search-based nav", verified | no | no |
+| LSP | no | no | yes ("usages"), verified | no | no | yes, **diagnostics only**, verified | yes, verified |
+| SCIP / static code-intel index | no | no | no | no | yes (invented it), verified | no | no |
+| Symbol graph + PageRank | no | no | no | yes, verified | no | no | no |
+| Content hashing for freshness | no | yes (Merkle), verified | server-side | no | commit-level | no | n/a |
 
 ## Per-harness notes
 
@@ -118,6 +117,37 @@ search work.
 
 Source: `github.com/oraios/serena`.
 
+### opencode
+
+Integrates LSP, but **only for diagnostics**, not for symbol navigation. Roughly
+25 built-in language servers (rust-analyzer, pyright, gopls, typescript, clangd,
+jdtls, ...), some auto-installed, disabled by default, enabled per project.
+
+Measured size, which is the useful part:
+
+| File | Size | Role |
+|---|---|---|
+| `lsp/server.ts` | 55 KB | the per-language table: command, extensions, init options |
+| `lsp/client.ts` | 23 KB | protocol client |
+| `lsp/lsp.ts` | 17 KB | lifecycle, dispatch, diagnostics |
+| `lsp/language.ts` | 2.5 KB | extension detection |
+| `lsp/diagnostic.ts`, `lsp/launch.ts` | 1.7 KB | glue |
+
+More than half the code is the language table, not the protocol. And this is the
+cheapest possible use: push-notification diagnostics, no
+definition/references requests.
+
+Their own warning, which is the strongest available evidence on the cost:
+
+> "LSP can help the agent find and fix issues ... but it is not always a net
+> positive. Language servers can get out of sync, use significant memory, vary
+> by version or project, and slow down agent workflows. In many projects it is
+> better to have the agent run lint, typecheck, or other diagnostic CLI tools
+> directly."
+
+Source: `opencode.ai/docs/lsp`, `github.com/anomalyco/opencode`
+`packages/opencode/src/lsp/`.
+
 ### Not verified this session
 
 - **Codex CLI**: almost certainly ripgrep plus shell, but we have no primary
@@ -130,6 +160,42 @@ Source: `github.com/oraios/serena`.
 - **OpenHands, Continue, Zed**: Zed is tree-sitter and LSP based as an editor
   and runs agents through ACP, but we did not confirm what its agent uses for
   retrieval. Continue and OpenHands not confirmed.
+
+## The real cost of LSP, in three parts
+
+1. **Protocol client: light.** JSON-RPC over stdio, `Content-Length` framing,
+   request/response correlation, the initialize handshake, document sync.
+   Roughly 500 to 800 lines of Rust, with `lsp-types` supplying the messages.
+2. **Language table: moderate and boring.** Which binary, which extensions,
+   which init options, per language. opencode spent 55 KB on 25 languages; four
+   languages is a couple hundred lines.
+3. **Runtime: heavy.** A language server is a program holding a whole-project
+   index. rust-analyzer on a large workspace is hundreds of MB to GBs of RAM and
+   tens of seconds to warm up. It gets out of sync, its version matters, and it
+   must be installed. Diagnostics are push notifications and cheap; definition
+   and references are request/response and need the full index, which is the
+   expensive part.
+
+Two classic bug sources: positions are line plus UTF-16 code units, not bytes,
+and headless use means the server indexes the whole workspace, not a few open
+buffers.
+
+**Cheaper routes to the same win**
+
+- **ctags**: one parseable file, name to file and line. ~90% of "go to
+  definition" for ~1% of the weight. No process, no warm-up, no staleness.
+- **A name index over our own tree-sitter outline**: in-process ctags, free.
+- **SCIP**: read a file, no process, exact. Needs an indexer to have run.
+- **MCP**: kcode is already an MCP client (`mcp_search`, `mcp_call`). Serena is
+  an MCP server exposing LSP symbol tools, so real LSP can arrive as config
+  rather than code we own. Catches: GPL-3.0 application, separate install,
+  still needs the language servers.
+
+**Revised ranking**
+
+1. lexical + tree-sitter outline, in-process, always available
+2. ctags consumption, nearly free, real go-to-definition
+3. LSP only via MCP when a server is already present, never bundled or installed
 
 ## What this means for graphgrep
 
