@@ -38,20 +38,38 @@ later release and would lock in the wrong behaviour.
 ## Baseline, 2026-09-27
 
 17 tasks, kcode as corpus, `rg` absent so agentgrep uses its native fallback
-(native versus native, an honest comparison).
+(native versus native, an honest comparison). Measured on a quiet machine after
+an earlier run was contended and had to be discarded.
 
-| tool | recall | mean tok→ans | median | p90 | max output tok |
-|---|---|---|---|---|---|
-| agentgrep 0.1.6 | 17/17 | 6,340 | 383 | 1,762 | 154,351 |
-| graphgrep | 17/17 | 6,339 | 383 | 1,762 | 154,356 |
+| tool | recall | median tok→ans | p90 | max out tok | median latency | p95 |
+|---|---|---|---|---|---|---|
+| agentgrep 0.1.6 | 17/17 | 383 | 1,762 | 154,351 | 30.3 ms | 44.2 ms |
+| graphgrep | 17/17 | 383 | 1,762 | 154,356 | 64.3 ms | 100.7 ms |
+
+Latency is per call, including process start-up, which a harness calling
+in-process does not pay. So these overstate what kcode sees and are best read as
+an upper bound and as a relative comparison between the two tools.
 
 Excluding the two deliberately generic queries (`grep-swarm-stress`,
-`grep-todo-stress`):
+`grep-todo-stress`), tokens to answer are 379 median for both tools, while the
+latency gap is unchanged, so it is not caused by output size.
 
-| tool | mean tok→ans | median | max |
-|---|---|---|---|
-| agentgrep 0.1.6 | 481 | 379 | 1,762 |
-| graphgrep | 480 | 378 | 1,762 |
+## The latency finding, and it is my regression
+
+Tokens and recall are identical, and graphgrep is **2.2x slower** on grep while
+matching exactly on outline. The cause is known and it is mine: agentgrep's
+native path is **threaded** (`thread::scope`, one worker per core chunking the
+file list), and when this project dropped the `rg` fast path it dropped the
+threading with it. The absorbed `lexical.rs` scans serially.
+
+This is the first evidence for measuring three axes rather than one. On tokens
+and recall the two tools are indistinguishable, and the entire difference is
+visible only in latency.
+
+The fix is not simply "add threads", because it interacts with the bounded
+packet: parallel workers need either per-worker bounded heaps merged at the end,
+or a cheap two-pass over a ranked shortlist. Bounding and parallelism have to be
+designed together.
 
 ## What this tells us
 

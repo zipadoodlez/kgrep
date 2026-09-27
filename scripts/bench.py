@@ -19,9 +19,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import statistics
+import subprocess
 import sys
+import time
 
 CHARS_PER_TOKEN = 4.0
 TASKS_DEFAULT = os.path.join(os.path.dirname(__file__), "..", "bench", "tasks.json")
@@ -53,8 +54,10 @@ def run_task(binary: str, corpus: str, task: dict, timeout: float) -> dict:
         "tokens_to_answer": None,
         "output_tokens": 0.0,
         "output_chars": 0,
+        "latency_ms": None,
         "error": None,
     }
+    started = time.perf_counter()
     try:
         proc = subprocess.run(
             cmd,
@@ -64,8 +67,11 @@ def run_task(binary: str, corpus: str, task: dict, timeout: float) -> dict:
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
+        result["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
         result["error"] = f"timeout after {timeout}s"
         return result
+
+    result["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
 
     out = proc.stdout
     result["exit"] = proc.returncode
@@ -87,13 +93,25 @@ def run_task(binary: str, corpus: str, task: dict, timeout: float) -> dict:
 def summarize(rows: list[dict]) -> dict:
     found = [r for r in rows if r["found"]]
     positions = [r["tokens_to_answer"] for r in found if r["tokens_to_answer"] is not None]
+    latencies = sorted(r["latency_ms"] for r in rows if r["latency_ms"] is not None)
+
+    def pct(values: list[float], fraction: float) -> float | None:
+        if not values:
+            return None
+        index = min(len(values) - 1, max(0, int(len(values) * fraction) - 1))
+        return round(values[index], 1)
+
     return {
         "tasks": len(rows),
         "found": len(found),
         "recall": round(len(found) / len(rows), 3) if rows else 0.0,
         "mean_tokens_to_answer": round(statistics.fmean(positions), 1) if positions else None,
         "median_tokens_to_answer": round(statistics.median(positions), 1) if positions else None,
+        "p90_tokens_to_answer": pct(sorted(positions), 0.9),
         "total_output_tokens": round(sum(r["output_tokens"] for r in rows), 1),
+        "max_output_tokens": round(max((r["output_tokens"] for r in rows), default=0.0), 1),
+        "median_latency_ms": pct(latencies, 0.5),
+        "p95_latency_ms": pct(latencies, 0.95),
     }
 
 
@@ -123,21 +141,26 @@ def main() -> int:
 
         name = os.path.basename(binary)
         print(f"\n=== {name} ===")
-        print(f"{'task':<26} {'found':<6} {'tok->ans':>9} {'out tok':>9}")
+        print(f"{'task':<26} {'found':<6} {'tok->ans':>9} {'out tok':>9} {'ms':>8}")
         for row in rows:
             position = row["tokens_to_answer"]
             mark = "yes" if row["found"] else "NO"
+            latency = row["latency_ms"]
             print(
                 f"{row['id']:<26} {mark:<6} "
                 f"{(position if position is not None else '-'):>9} "
-                f"{row['output_tokens']:>9}"
+                f"{row['output_tokens']:>9} "
+                f"{(latency if latency is not None else '-'):>8}"
             )
             if row["error"]:
                 print(f"  ! {row['error']}")
         print(
             f"recall {summary['recall']:.0%}  "
-            f"mean tokens->answer {summary['mean_tokens_to_answer']}  "
-            f"total output tokens {summary['total_output_tokens']}"
+            f"median tokens->answer {summary['median_tokens_to_answer']}  "
+            f"p90 {summary['p90_tokens_to_answer']}  "
+            f"max out {summary['max_output_tokens']}  "
+            f"median latency {summary['median_latency_ms']}ms  "
+            f"p95 {summary['p95_latency_ms']}ms"
         )
 
     if args.json:
