@@ -1,0 +1,124 @@
+{
+  "//": "DRAFT for gate 2, not yet run. Multi-turn tasks for measuring whether harness familiarity pays on top of kgrep's ranking.",
+  "//shape": "Each task is a sequence of tool calls. `turns` are the invocations; the final turn carries the answer. `gold_known` is what the gold-state arm hands in directly. The derived arm replaces it with whatever the earlier turns actually hit, the way kcode would.",
+  "//metric": "tokens_before(final output, expect_path), plus the same for the whole sequence concatenated. Both are reported, because the sequence total dilutes a per-turn effect and the final-turn figure alone ignores the cost of getting there.",
+  "//constraints": "Two hard constraints, both discovered while drafting, and together they are why authoring this set is the real cost of gate 2.",
+  "//constraint-1": "The final query must match the file the agent already read, or familiarity has nothing to trim.",
+  "//constraint-2": "That known file must rank BEFORE the answer. tokens-to-answer only counts tokens emitted before the expected path appears, so trimming any file that ranks after the answer cannot change the number at all. Verified consequence: for `ToolContext` and `ToolOutput` the definition ranks first, so those queries can only ever be controls.",
+  "//status": "verified = ranks and overlaps confirmed against the corpus and kgrep. to-verify = the specific check is named in `verify`.",
+
+  "tasks": [
+    {
+      "id": "mt-config-repeat",
+      "kind": "benign",
+      "question": "Search, read the top hit, search the same thing again.",
+      "turns": [
+        { "args": ["grep", "show_agentgrep_output"] },
+        { "args": ["grep", "show_agentgrep_output"] }
+      ],
+      "expect_path": "crates/jcode-config-types/src/display.rs",
+      "gold_known": ["crates/jcode-tui-messages/src/cache.rs"],
+      "status": "verified",
+      "why": "cache.rs ranks 1st and display.rs ranks 8th, so seven file blocks sit before the answer and one of them is known. This is the strongest benign case in the set: the known block is unambiguously before the answer, and the pattern (search, read, re-search) is what agents actually do."
+    },
+    {
+      "id": "mt-config-accumulate",
+      "kind": "benign",
+      "question": "Two files read before the final search, both ahead of the answer.",
+      "turns": [
+        { "args": ["grep", "show_agentgrep_output"] },
+        { "args": ["grep", "show_agentgrep_output"] },
+        { "args": ["grep", "show_agentgrep_output"] }
+      ],
+      "expect_path": "crates/jcode-config-types/src/display.rs",
+      "gold_known": [
+        "crates/jcode-tui-messages/src/cache.rs",
+        "crates/jcode-tui/src/tui/ui_messages.rs"
+      ],
+      "status": "verified",
+      "why": "cache.rs and ui_messages.rs rank 1st and 2nd. Two known blocks before the answer instead of one, which is the accumulation case: three turns should beat one, and if it does not, familiarity does not compound."
+    },
+    {
+      "id": "mt-answer-is-known",
+      "kind": "adversarial",
+      "question": "The answer lives in the file that was already read. Does trimming it cost the answer?",
+      "turns": [
+        { "args": ["grep", "show_agentgrep_output"] },
+        { "args": ["grep", "show_agentgrep_output"] }
+      ],
+      "expect_path": "crates/jcode-config-types/src/display.rs",
+      "gold_known": ["crates/jcode-config-types/src/display.rs"],
+      "status": "verified",
+      "why": "The known file IS the answer, and it ranks 8th. Structure trimming is deletion, not compression, so if the field that answers the question falls past the tier cap it disappears into `... N more symbols` and recall falls with tokens. This is the probe for the failure mode the benchmark already recorded once."
+    },
+    {
+      "id": "mt-region-pruned",
+      "kind": "adversarial",
+      "question": "The answer is a region body inside the file already read. Does compression keep the answer?",
+      "turns": [
+        { "args": ["trace", "subject:show_agentgrep_output", "relation:defined"] }
+      ],
+      "expect_path": "crates/jcode-config-types/src/display.rs",
+      "gold_known": ["crates/jcode-config-types/src/display.rs"],
+      "gold_known_regions": [
+        {
+          "path": "crates/jcode-config-types/src/display.rs",
+          "start_line": 64,
+          "end_line": 64
+        }
+      ],
+      "status": "to-verify",
+      "verify": "Confirm a trace for this subject actually emits a region covering line 64 of display.rs, and that it is the region carrying the answer. Gate 1 showed pruning turns `full region` into `snippet` keeping the signature line, so the region survives at one line; what this task checks is whether that one line is enough to answer with."
+    },
+    {
+      "id": "mt-framework-first-rank-control",
+      "kind": "control",
+      "question": "The answer already ranks first, so nothing can be trimmed before it.",
+      "turns": [
+        { "args": ["grep", "ToolContext"] }
+      ],
+      "expect_path": "crates/jcode-tool-core/src/lib.rs",
+      "gold_known": ["crates/jcode-app-core/src/tool/webfetch.rs"],
+      "status": "verified",
+      "why": "The definition ranks 1st and 57 files mention the term, so there is plenty to trim and none of it is before the answer. Prediction: tokens-to-answer is byte-identical with and without familiarity. If it moves, the measurement is wrong, not the feature."
+    },
+    {
+      "id": "mt-framework-second-control",
+      "kind": "control",
+      "question": "Same shape, a different shared term.",
+      "turns": [
+        { "args": ["grep", "ToolOutput"] }
+      ],
+      "expect_path": "crates/jcode-tool-core/src/lib.rs",
+      "gold_known": ["crates/jcode-app-core/src/tool/todo.rs"],
+      "status": "verified",
+      "why": "Definition ranks 1st, 44 files mention it. A second independent control for the same prediction, because one control is not a control."
+    },
+    {
+      "id": "mt-no-overlap-control",
+      "kind": "control",
+      "question": "The known file does not appear in the final query's hits at all.",
+      "turns": [
+        { "args": ["grep", "webfetch"] },
+        { "args": ["grep", "apply_patch"] }
+      ],
+      "expect_path": "crates/jcode-app-core/src/tool/apply_patch.rs",
+      "gold_known": ["crates/jcode-app-core/src/tool/webfetch.rs"],
+      "status": "verified",
+      "why": "webfetch.rs contains no occurrence of `apply_patch` (checked). Prediction: byte-identical, because there is nothing to trim. Proves the harness is not manufacturing wins from a known set that never intersects the query."
+    },
+    {
+      "id": "mt-registry-broad",
+      "kind": "benign",
+      "question": "A broad final query where the tool registry is the answer and a read file is among the hits.",
+      "turns": [
+        { "args": ["grep", "webfetch"] },
+        { "args": ["grep", "insert_tool_timed"] }
+      ],
+      "expect_path": "crates/jcode-app-core/src/tool/mod.rs",
+      "gold_known": ["crates/jcode-app-core/src/tool/webfetch.rs"],
+      "status": "to-verify",
+      "verify": "`register` and `insert_tool_timed` are concentrated in tool/mod.rs (19 and 21 hits) and absent from webfetch.rs (0), so this pair has NO overlap and is currently a fourth control. Either find a term that hits both webfetch.rs and mod.rs, or replace this task. Recorded rather than dropped because the first draft got this wrong by assuming tools share framework terms, and they do not."
+    }
+  ]
+}

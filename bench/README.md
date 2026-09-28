@@ -403,6 +403,68 @@ label itself deserves a second look.
 own finder. The signal *choice* is well supported by this set; the constants are
 not tuned, and the task set is small. A second, larger set would harden it.
 
+## Gate 1: does harness context do anything? 2026-09-28
+
+Before porting agentgrep's harness-context mechanism to kgrep, or writing a
+spec for it, the cheap question comes first: does it change any output at all?
+It has to be asked against agentgrep, because kgrep accepts `--context-json` and
+ignores it, so kgrep was never an implementation of this.
+
+Method: `bench/oracle/target/release/agentgrep-harness trace subject:lsp
+relation:implementation kind:code path:src/tool --path <fixture>`, run four
+times, once per context file. The fixture is one file with eleven top-level
+items, so the structure tiers have room to show, and it is in `target/`, which is
+ignored.
+
+| arm | lines | chars | what changed |
+|---|---|---|---|
+| no context | 97 | 2669 | — |
+| `known_files` | 94 | 2557 | structure 10 to **6** items, plus "reduced repeated structure from harness context" |
+| plus `focus_files` | 94 | 2556 | structure 10 to **4** items, plus "compressed file structure from harness context" |
+| plus `known_regions` | 88 | 2530 | 3 regions `full region` to **`snippet`**, plus 3 "compressed repeated region" notes |
+
+So it is live, and the three thresholds are hard-coded and conjunctive in
+`smart_engine.rs`:
+
+```
+structure_budget_for_file   10 items, or 6 if structure>=0.8 and version>=0.6
+                            and prune>=0.7, or 4 if the file is also focused
+should_prune_region         prune>=0.7 and body>=0.7 and version>=0.6
+```
+
+### What it turned out to be, and it is not one mechanism
+
+**The two halves carry different risk.** Region "pruning" is *compression*: the
+region keeps its signature line, `full region` becomes `snippet`, and a note says
+why. The agent still knows the region exists and where. Structure "pruning" is
+**deletion**: the items are gone, collapsed into `... N more symbols`. This
+benchmark has already lost a task to a cap that deleted the answering thing, so
+the half that deletes is the half to be careful with.
+
+**It is inert without a calibrated producer.** Every gate needs confidences above
+0.6 to 0.8, and `Familiarity`'s fields default to zero, so a `context.json`
+listing paths with no confidences does exactly nothing. Whatever value this
+feature has lives in the producer's calibration, not in the consumer's logic.
+
+**The magnitude is small, and this fixture is its best case.** Here 100% of the
+hits are in the marked file, and the whole output still moves only 4 to 5% in
+characters. Structure is capped at 10 by default, so the tiers only bite on files
+with more than 6 items, and only on files the harness has already marked known.
+
+### Why this matters for the port decision
+
+A 10x was already won by *ordering*, which puts the answer first. This mechanism
+trims a few percent off the block for a file already known, so it is a
+second-order effect on top of a first-order fix, and the opportunity it addresses
+is mostly gone. Combined with the confidences nothing currently emits, that is
+most of the reason dropping it during the `trace` port cost nothing measurable.
+
+**Verdict: gate 1 passes, and it does not decide the port.** It establishes that
+the mechanism is real, that it is conservative where it compresses and destructive
+where it deletes, and that its best case is a few percent. Whether that is worth
+having on top of kgrep's ranking is gate 2, which measures it against the oracle's
+ranking replaced by kgrep's.
+
 ## What this tells us
 
 > **Correction, same day. The max-output claim below is wrong for the harness
