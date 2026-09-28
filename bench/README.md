@@ -140,7 +140,7 @@ inferred.** agentgrep's worst case through the oracle is 6,752 tokens, not
 **2. agentgrep loses a task.** With the 200-match cap applied at render time over
 a list sorted by path, the file holding the answer for `grep swarm` is never
 rendered at all. Recall 24/25. This is the failure mode predicted in
-`docs/AGENTGREP.md`, weakness 1, now demonstrated: truncating an unranked list
+`docs/PRIOR-ART.md`, weakness 1, now demonstrated: truncating an unranked list
 drops the answer, not merely the detail.
 
 **3. kgrep holds 25/25** because coverage is not what it cuts. The bound drops

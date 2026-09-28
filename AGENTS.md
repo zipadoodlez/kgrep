@@ -10,9 +10,8 @@ tokens and latency well and to keep memory inside a declared ceiling.
 This file is the plan of record: what is settled, what we have measured, where the
 code actually is, and what comes next. `docs/` holds the longer reasoning.
 
-- `docs/DESIGN.md` — the shaper, the cache, and the levels of synergy.
-- `docs/SOTA.md` — how every other harness retrieves code, with sources.
-- `docs/AGENTGREP.md` — the tool we absorb, and the weaknesses we inherit.
+- `docs/PRIOR-ART.md` — how other harnesses retrieve code with sources, what we
+  absorb from agentgrep, and the LSP cost analysis behind the exclusions.
 - `bench/README.md` — the benchmark, the baseline, and the retracted claims.
 
 ## What this is
@@ -168,30 +167,37 @@ Settled:
 
 - The product is the packet, not the engine. Sources are pluggable; the shaper is
   ours.
-- Flat memory with respect to repository size is the binding constraint and the
-  differentiator.
-- No language servers or embedding models in-process.
+- Memory is a **guardrail with a declared ceiling**, not the objective. Tokens and
+  latency are the objective, and a bounded or mmapped spend that buys either is
+  welcome. This bullet used to claim flat memory was the binding constraint, which
+  the objective section above already contradicts.
+- No language servers or embedding models in-process. The evidence is in
+  `docs/PRIOR-ART.md`, and it is why LSP is declined rather than missed.
 - agentgrep contributes code.
 - The scan is being commoditized upstream (they intend to rebuild `rg` in-process
   from the same libraries). Competing there is competing where the incumbent is
   already moving. Differentiation lives in the shaping, the memory property, and
   the harness integration.
 
-Open, and genuinely unknown:
+Answered since this section was first written, and recorded rather than repeated:
 
-- **What is a grep hit's relevance score?** "Rank before spending" needs one, and
-  grep currently has none. Candidates: does the match land in a symbol's *label*,
-  how many matches the file has (specificity), file role, structural centrality
-  later. This is the first real ranking question and it is unsolved.
-- **What is the right default token budget?** Unknown until measured.
+- **What is a grep hit's relevance score?** Four cheap signals, in `rank.rs`. The
+  surprise was that specificity on its own is *worse* than nothing.
+- **What is the right default token budget?** `max_detail_tokens` defaults to 8,000,
+  chosen against measured medians. Whether it should differ per verb is still open.
+- **Does structural ranking actually improve answers?** Tested, and the three
+  regressions turned out not to be a structure problem at all. That is why the
+  in-process parse was cut.
+- **Graph freshness policy.** Answered for the source that exists: rebuild rather
+  than patch. See Stage 4b.
+
+Still open, and genuinely unknown:
+
 - **How should the tail be ordered?** If we name every matching file, in what
   order, and does that order matter to a model?
-- **Does structural ranking actually improve answers?** Testable once the
-  declaration source exists. Currently an assumption, and it is the assumption
-  Stage 4 rests on.
 - **How the name ages.** `kgrep` is anchored to kcode, which is meaningful only
   while kcode is the sole consumer. That is a deliberate trade, not an oversight.
-- **Graph freshness policy.** How stale is too stale, if the artifact is built.
+- **Whether the graph ever earns its place.** See Stage 7.
 
 ## What we have measured
 
@@ -495,6 +501,23 @@ what clusters, what is surprising. Note that the *valuable* part of the graph id
 is Stage 4, as a ranking and zoom signal over the shaper. This stage is what
 remains once that is done, and it may not earn its place.
 
+The reasoning that got this far, kept because it is the case for the two halves
+being one tool at all rather than two:
+
+- **The map would make the search smarter.** Ranking stops being textual and becomes
+  structural: how connected a thing is, which cluster it sits in, which of the
+  twelve things named `render` is the one meant. That is the best available answer
+  to the main complaint about plain search, which is noise.
+- **The search fills the map's holes.** A map built from declarations is blind to
+  relations wired by a string: command tables, plugin registries, config keys,
+  string dispatch. A plain scan finds those and can mark them at lower confidence.
+  Without it the map has holes exactly where the code is most indirect.
+
+Neither half is a separate machine: a map with no relations drawn is plain search,
+and the lexical floor is that same walk over it. That is the case for the graph as a
+**signal**; the case for a separate artifact is much weaker, which is why this stage
+is last and optional.
+
 - **Exit:** it answers something the earlier stages cannot, at no resident cost.
 
 ### Cheap win, available now
@@ -502,7 +525,7 @@ remains once that is done, and it may not earn its place.
 The output cap belongs in the library, not the caller. That is a small,
 clearly-correct fix to agentgrep that upstream would plausibly accept, and if it
 lands, kcode improves immediately without this project shipping anything. See
-`docs/AGENTGREP.md`, weakness 5. Worth attempting regardless of how this project
+`docs/PRIOR-ART.md`, weakness 5. Worth attempting regardless of how this project
 goes, and good faith while superseding someone's work.
 
 ### Gate — the swap
