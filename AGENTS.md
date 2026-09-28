@@ -569,8 +569,8 @@ functions it used to have were doing.
 
 ### The dependency, pinned
 
-kgrep has a private remote at `zipadoodlez/kgrep`. Pin a **revision**, resolved
-from a tag:
+kgrep has a public remote at https://github.com/zipadoodlez/kgrep, so a consumer
+needs no credentials to fetch it. Pin a **revision**, resolved from a tag:
 
 ```bash
 git ls-remote https://github.com/zipadoodlez/kgrep.git refs/tags/v0.1.1
@@ -583,11 +583,6 @@ kgrep = { git = "https://github.com/zipadoodlez/kgrep.git", rev = "<that revisio
 
 As of `v0.1.1` that revision is `bc205e8362831ca234976bea44cf92b614950b5b`, verified
 by building a crate outside kgrep against exactly that line.
-
-Two consequences of a private remote. Fetching needs credentials, `gh auth
-setup-git` or a token, or the failure lands at fetch rather than compile. And
-turning it public is one command but discloses kcode's internals, because nine
-files here name its crates, its tools and this seam.
 
 Because the consumer pins a revision rather than tracking a branch, kgrep keeps
 moving: **additive changes only** from here, and a consumer takes them by bumping
