@@ -37,20 +37,29 @@ Both blockers are cleared, and the dependency has a concrete answer.
 
 ### The dependency, answered
 
-kgrep now has a remote. It is **private**, and the revision to pin is
-`3bef4ff8dc1c416b44f078be2266152534ef603e`, which is tagged `v0.1.0`:
+kgrep now has a remote. It is **private**, under `zipadoodlez/kgrep`.
+
+Pin a **revision**, resolved from a tag, rather than a tag or a branch:
+
+```bash
+git ls-remote https://github.com/zipadoodlez/kgrep.git refs/tags/v0.1.1
+```
 
 ```toml
 # crates/jcode-app-core/Cargo.toml — replace the path dependency
-kgrep = { git = "https://github.com/zipadoodlez/kgrep.git", rev = "3bef4ff8dc1c416b44f078be2266152534ef603e" }
+kgrep = { git = "https://github.com/zipadoodlez/kgrep.git", rev = "<that revision>" }
 ```
 
-Pin the `rev` rather than the tag. agentgrep is pinned by tag, but a tag can be
-moved and a revision cannot, and this one is meant to be a fixed point while kcode
-is verified against it. Both exist; use the revision.
+Written as a command on purpose. agentgrep is pinned by tag, but a tag can be
+moved and a revision cannot, and a revision written into this file is a second
+copy of a value that already has a source of truth. Resolve it once, pin it, and
+this file never goes stale.
 
-**Verified, not assumed.** A throwaway crate outside kgrep, depending on exactly
-that line, fetched and ran:
+As of `v0.1.1` that revision is `bc205e8362831ca234976bea44cf92b614950b5b`. The
+tag exists for findability; the revision is what belongs in `Cargo.toml`.
+
+**Verified, not assumed.** A throwaway crate outside kgrep, depending on nothing
+but that line, fetched the repository and ran the frozen API:
 
 ```
 Compiling kgrep v0.1.0 (https://github.com/zipadoodlez/kgrep.git?rev=3bef4ff8...#3bef4ff8)
