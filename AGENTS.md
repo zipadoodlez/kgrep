@@ -13,9 +13,7 @@ code actually is, and what comes next. `docs/` holds the longer reasoning.
 - `docs/DESIGN.md` — the shaper, the cache, and the levels of synergy.
 - `docs/SOTA.md` — how every other harness retrieves code, with sources.
 - `docs/AGENTGREP.md` — the tool we absorb, and the weaknesses we inherit.
-- `docs/KCODE_BRIEF.md` — the handoff for whoever works the kcode side. Self
-  contained, and it carries the dependency pin and the budget axis.
-- `bench/README.md` — the benchmark, the baseline, and one retracted claim.
+- `bench/README.md` — the benchmark, the baseline, and the retracted claims.
 
 ## What this is
 
@@ -509,9 +507,10 @@ goes, and good faith while superseding someone's work.
 
 ### Gate — the swap
 
-Point kcode at this. Blocked on: parity (Stage 3), attribution written, and a
-clean consumer build. The name should be settled by here, because kcode's tool
-names are what the model sees.
+All three original blockers are cleared: parity is done, attribution is landed, and
+the consumer build is verified against a pinned revision. What remains is the
+kcode-side list above, and the name, which should be settled here because kcode's
+tool names are what the model sees.
 
 ### Stop condition
 
@@ -539,28 +538,89 @@ kcode feature, not ours, and it is why nothing is lost by dropping it here.
 
 ## Consumers and the kcode seam
 
-Today kcode depends on agentgrep as a library and calls:
+kcode is the only consumer, and that is deliberate: no MCP server, no third-party
+CLI contract, and kcode's tool names are ours to change.
 
+### The seam
+
+One tool with four modes, not four tools, and the model mostly does not say the
+name: `grep`, `file_grep` and `Grep` all resolve to it. The seam is one input type
+and one answer type.
+
+```rust
+Query { where_: Where, paths_only: bool, verb: Verb }   // the one input
+Verb  { Lexical{..}, Path{..}, Outline{..}, Structural{..} }
+
+kgrep::lexical::run_grep(&query, budget) -> Packet
+kgrep::find::run_find(&query, budget)    -> Packet
+kgrep::trace::run_trace(&query, budget)  -> Packet
+kgrep::outline::run_outline(&query)      -> OutlineResult
 ```
-::agentgrep::cli::{FindArgs, FullRegionMode, GrepArgs, OutlineArgs, SmartArgs}
-::agentgrep::find::{FindResult, run_find}
-::agentgrep::outline::run_outline
-::agentgrep::search::{GrepResult, run_grep}
-::agentgrep::smart_dsl::{SmartQuery, parse_smart_query}
-::agentgrep::smart_engine::{SmartResult, run_smart}
-::agentgrep::render::{render_find_output, render_grep_output,
-                      render_outline_output, render_smart_output}
+
+Three verbs return `Packet` and `outline` returns its own type, deliberately: the
+answer shapes genuinely differ, and one entry would have meant one renderer
+branching four ways. `RenderOptions` holds one field, `debug_score`, because the
+other two flags we expected to find there, `paths_only` and `full_region`, turned
+out to be query options.
+
+kcode builds a `Query` from its tool params and renders the answer. It no longer
+constructs kgrep's command-line types, which is what the four `build_*_args`
+functions it used to have were doing.
+
+### The dependency, pinned
+
+kgrep has a private remote at `zipadoodlez/kgrep`. Pin a **revision**, resolved
+from a tag:
+
+```bash
+git ls-remote https://github.com/zipadoodlez/kgrep.git refs/tags/v0.1.1
 ```
 
-Its wrapper lives in `kcode/crates/jcode-app-core/src/tool/agentgrep.rs` (+
-`args.rs`, `context.rs`), and two of its behaviours are load-bearing and easy to
-miss:
+```toml
+# crates/jcode-app-core/Cargo.toml
+kgrep = { git = "https://github.com/zipadoodlez/kgrep.git", rev = "<that revision>" }
+```
 
-- It renders with `Some(200)`, so the model sees a bounded packet already.
-- It feeds `context.json` for familiarity, which is the seam stage 5 grows from.
+As of `v0.1.1` that revision is `bc205e8362831ca234976bea44cf92b614950b5b`, verified
+by building a crate outside kgrep against exactly that line.
 
-**kcode is in scope to refactor**, bounded to that integration site. **No
-dependency swap until kgrep is done and tested.**
+Two consequences of a private remote. Fetching needs credentials, `gh auth
+setup-git` or a token, or the failure lands at fetch rather than compile. And
+turning it public is one command but discloses kcode's internals, because nine
+files here name its crates, its tools and this seam.
+
+Because the consumer pins a revision rather than tracking a branch, kgrep keeps
+moving: **additive changes only** from here, and a consumer takes them by bumping
+the rev.
+
+### What is left before the swap
+
+1. **The budget axis, in kcode.** `Budget` has `max_total_matches`, `max_hits` and
+   `max_detail_tokens`, and the third is the unit the objective is measured in.
+   Today `max_regions` reaches the first, `max_files` reaches the second for find
+   and trace only, and `max_detail_tokens` is unreachable. Three steps: add a token
+   knob, decide `max_regions`, map `max_files` for grep.
+2. **Delete the context producer, ~1044 lines** at
+   `kcode/crates/jcode-app-core/src/tool/agentgrep/context.rs`. It gathers exposure
+   descriptors, writes them to a temporary file, hands the path to the call, and
+   deletes it. Nothing else reads it, and its only consumer was the familiarity
+   mechanism that gates 1 and 2 rejected. It also runs on every `trace` and
+   `outline` call. **Drop the producer, not the concept:** what the harness has
+   written is still the signal the index wants, and that is derived, not stored.
+3. **Settle the name**, since the model sees it: schema, alias table, flags like
+   `show_agentgrep_output`, display strings, tests.
+4. **Then the swap**, which is otherwise unblocked: parity done, attribution
+   landed, dependency answered.
+
+### What the swap must not regress
+
+- The four modes, their names, and the `grep` / `file_grep` / `Grep` alias.
+- The 5 s foreground budget and the background adoption path.
+- Single-file filtering when the model passes one file as `path`.
+- The slow-call warning above 2 s.
+
+A fifth, `context.json` being written per call, was on this list and is now slated
+for deletion with the producer above.
 
 ## Layout
 

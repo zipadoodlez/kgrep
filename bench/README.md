@@ -590,10 +590,3 @@ Two consequences, and the second is the real finding:
    the library, where it cannot be forgotten. That is a real improvement, and a
    different one from "add a budget that does not exist".
 
-## The first thing to build (revised)
-
-**Move the output cap into the library default**, so the bounded packet is what
-you get without asking, and `--unbounded` (or an explicit `Budget`) is the
-deliberate opt-out. Then re-measure through a harness-faithful bench binary and
-require that recall does not regress.
-
