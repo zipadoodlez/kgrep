@@ -28,17 +28,44 @@ foreground budget with background adoption (`AGENTGREP_FOREGROUND_BUDGET`,
 
 ## Landability
 
-The commit message says NOT LANDABLE YET for two reasons. One is cleared:
+Both blockers are cleared, and the dependency has a concrete answer.
 
 | blocker | state |
 |---|---|
-| kgrep must carry agentgrep's MIT notice | **cleared**, `LICENSE` and `NOTICE` at kgrep `3ea9b3f` |
-| `Cargo.toml` points at `../../../kgrep` as a path dependency | open, and it is a decision rather than a chore |
+| kgrep must carry agentgrep's MIT notice | **cleared**, `LICENSE` and `NOTICE` at `3ea9b3f` |
+| `Cargo.toml` points at `../../../kgrep` | **answered below**: a private remote, pinned by revision |
 
-The dependency is the remaining one. kgrep has no git remote, so there is nothing
-to point a git dependency at yet. Options are to keep the path dependency for now
-and land the swap once kgrep is published, or to give kgrep a remote and pin the
-git revision the way agentgrep is pinned today. Do not invent a third way.
+### The dependency, answered
+
+kgrep now has a remote. It is **private**, and the revision to pin is
+`3bef4ff8dc1c416b44f078be2266152534ef603e`, which is tagged `v0.1.0`:
+
+```toml
+# crates/jcode-app-core/Cargo.toml — replace the path dependency
+kgrep = { git = "https://github.com/zipadoodlez/kgrep.git", rev = "3bef4ff8dc1c416b44f078be2266152534ef603e" }
+```
+
+Pin the `rev` rather than the tag. agentgrep is pinned by tag, but a tag can be
+moved and a revision cannot, and this one is meant to be a fixed point while kcode
+is verified against it. Both exist; use the revision.
+
+**Verified, not assumed.** A throwaway crate outside kgrep, depending on exactly
+that line, fetched and ran:
+
+```
+Compiling kgrep v0.1.0 (https://github.com/zipadoodlez/kgrep.git?rev=3bef4ff8...#3bef4ff8)
+pin works: 1 files, 2 matches
+```
+
+Two things to know about a private dependency:
+
+- **Fetching needs credentials.** It worked here because `gh` is authenticated on
+  this machine. Any other machine, or CI, needs `gh auth setup-git` or an
+  equivalent token, or the build fails at fetch rather than at compile.
+- **Making it public later is one command, and it discloses more than it looks
+  like.** Nine files in the repository name kcode's internals, including crate
+  and tool names, and the integration brief itself. That is a separate decision
+  from landing this.
 
 ## The frozen interface
 
