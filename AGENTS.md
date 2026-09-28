@@ -13,10 +13,8 @@ code actually is, and what comes next. `docs/` holds the longer reasoning.
 - `docs/DESIGN.md` — the shaper, the cache, and the levels of synergy.
 - `docs/SOTA.md` — how every other harness retrieves code, with sources.
 - `docs/AGENTGREP.md` — the tool we absorb, and the weaknesses we inherit.
-- `docs/INTEGRATION.md` — the kcode seam: what it is today, and the five decisions
-  the swap turns on. A proposal; the facts in it are read from the kcode tree.
 - `docs/KCODE_BRIEF.md` — the handoff for whoever works the kcode side. Self
-  contained, and it tells them to wait for the shape to freeze.
+  contained, and it carries the dependency pin and the budget axis.
 - `bench/README.md` — the benchmark, the baseline, and one retracted claim.
 
 ## What this is
@@ -35,6 +33,7 @@ be allowed in.
 | Lexical scan | exact text and regex | none, always available | working |
 | Structure sketch | symbols, ranges | bounded per file | working, line-based |
 | ctags, per file | structure in ~100 languages | one subprocess per `outline` | working, `outline` only |
+| ctags tag index | the same, for every verb | one mmapped file | not started, next |
 | mmapped n-gram index | fast regex on huge repos | mmapped, evictable | not started |
 | Harness state | what the agent read, what changed | nearly free | **measured, not worth porting** |
 | Resolution (ours, approximate) | who might use this | bounded index | not started |
@@ -373,12 +372,49 @@ What the work actually turned up, all of it measured rather than assumed:
   call. Explicitly **not** part of this exit, as before: the three ranking
   regressions, which are an ambiguity and two string-keyed names.
 
-What is deliberately still not built: the **repo-wide tag index**, which is what
-would make "where is X defined" a lookup instead of a scan. It needs an artifact
-and a freshness story, and definition lookup is the weakest of the three cases,
-because a distinctive name is already easy to find and our latency is already 19.9
-ms. If a real range need or a huge repository shows up with a number attached, that
-is the moment to revisit it.
+### Stage 4b — the repo-wide index (next)
+
+The per-file path serves `outline` and only `outline`. `grep`, `find` and `trace`
+still get structure from the scanner alone, so on any repository outside our four
+languages they get none at all. The index is what closes that.
+
+Measured, and this is why it is built from the walker's own file list:
+
+| | build | size | name lookup |
+|---|---|---|---|
+| `ctags -R` over the repo | 30,814 ms | 1,320 MB | 92 ms |
+| from the walker's file list | **514 ms** | **5.4 MB** | **2.6 ms** |
+| our whole-repo scan, for scale | — | — | 29.8 ms |
+
+The difference is that `target/` is 77 GB and ignore-listed, so `ctags -R` walks
+it. **Never invoke `ctags -R` for this**; feed it the list the search already
+walks. That one choice is 60x in time and 245x in size.
+
+Decided, so the next reader does not re-litigate it:
+
+- **An explicit API, scheduled by the harness.** A search uses a fresh index and
+  never builds one, because a build past 5 s becomes a background task and a
+  one-line grep must not. `ensure` builds, `invalidate` marks.
+- **Rebuild, not incremental.** 514 ms makes patching unnecessary, and ctags
+  cannot remove a file's old tags, so incremental correctness is a problem with no
+  payoff yet.
+- **The cache lives outside the repository**, keyed by the canonical root,
+  because it is derived state and must not appear in `git status`.
+- **Freshness has two signals.** kcode reports what it wrote, which it knows
+  exactly because it wrote it; modified times catch whatever did not go through a
+  write tool, such as a change made by a shell command. **Over-invalidate rather
+  than under-invalidate**: a missed change is a wrong answer, and an extra rebuild
+  is half a second.
+- **Judged by coverage, not tokens.** On kcode the scanner already covers
+  everything, so the index moves our token numbers by nothing. Its test is that a
+  non-Rust repository returns structure from `grep`.
+
+Still open: how big a repository gets an index at all. A monorepo build is
+minutes, so the honest answer may be to stay on the scanner above some size.
+
+- **Exit:** `grep` on a Go repository returns grouped structure; the index is
+  reused across calls; a stale index is never served; peak RSS stays under the
+  ceiling because it is read mmapped.
 
 #### Footnote: edits are not ours to improve
 
