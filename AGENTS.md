@@ -36,7 +36,7 @@ be allowed in.
 | Structure sketch | symbols, ranges | bounded per file | working, line-based |
 | ctags, per file | structure in ~100 languages | one subprocess per `outline` | working, `outline` only |
 | mmapped n-gram index | fast regex on huge repos | mmapped, evictable | not started |
-| Harness state | what the agent read, what changed | nearly free | partial, in agentgrep |
+| Harness state | what the agent read, what changed | nearly free | **measured, not worth porting** |
 | Resolution (ours, approximate) | who might use this | bounded index | not started |
 | Graph | what is central, what clusters | optional artifact | not started |
 
@@ -158,9 +158,12 @@ Known gaps in the code, honestly:
 - **The worst case is bigger than agentgrep's**: 16,061 output tokens against 6,752
   on the harness path. Deliberate, because we would rather return the answer than
   silently cap it away, but it is a real regression on that one axis.
-- **`trace --context-json` is accepted and not applied.** Harness state is Stage 5.
-- **Not shipped.** Attribution for agentgrep is owed, and jcode still runs
-  agentgrep. Every number here comes from the bench, not from the real path.
+- **`trace --context-json` is accepted and not applied**, deliberately. The
+  mechanism it feeds was measured against agentgrep and not ported; see Stage 5 and
+  `bench/README.md`. The flag stays so the CLI surface is unchanged.
+- **Not shipped.** Attribution is landed (`LICENSE`, `NOTICE`), and kcode has the
+  refactor on a branch, but jcode still runs agentgrep at HEAD. Every number here
+  comes from the bench, not from the real path.
 
 ## Where we are: theory
 
@@ -392,13 +395,46 @@ capability, it is unmeasured, and it belongs to the edit tool rather than to us.
 What symbol addressing added beyond a line range is surviving drift and
 expressing intent. Both are real, and neither is worth a parse on this evidence.
 
-### Stage 5 — harness state as a source
+### Stage 5 — harness state as a source (measured, and not worth porting)
 
 What the agent has already read, what changed since the last call, where the user
 is working. Nearly free, and the one advantage an in-harness tool has that no
-external tool can match. agentgrep touches it with `context.json`.
+external tool can match. agentgrep touches it with `context.json`, and kgrep accepts
+and ignores that flag.
 
-- **Exit:** measurable improvement on tasks where prior reading is relevant.
+**Two gates were run before porting anything, and the answer is no.** The full
+record is in `bench/README.md`; the short version:
+
+- **Gate 1, against agentgrep, ~1 hour.** The mechanism is live: a context file
+trims a known file's structure from 10 items to 6, or to 4 if the file is also
+focused, and compresses a known region from `full region` to `snippet` keeping its
+signature line. Structure trimming is **deletion**; region trimming is
+**compression**. It is also inert without confidences above 0.6 to 0.8, which
+nothing currently emits.
+- **Gate 2, as an upper bound rather than a spike.** The ceiling is 19 to 56% of
+tokens-to-answer, median 38%, which clears the 10% kill threshold. Then the check
+that decides it: 77% of that prefix is *matched match lines*, the content that
+answers the question, while the structure the mechanism exists to trim is a single
+inline `other:` line occupying **0%**. kgrep already collapsed it, for free and
+unconditionally.
+
+So: **do not port it.** Not because the saving is small, but because the format it
+optimises no longer exists here. A producer, a state format, a freshness problem
+and a confidence calibration to buy back a share of a 10% summary line is not a
+trade worth making.
+
+Two things outlive the decision, and they are the reason it was worth a day:
+
+- **`tokens-to-answer` cannot see content loss inside the answering file.** The
+  path still appears at the same offset while the answer's symbol may have
+  vanished. Any future pruning feature needs a recall guard on the *symbol*, not
+  on the file name.
+- **The measurement method.** `scripts/gate2.py` bounds a mechanism's benefit
+  without implementing it, and `bench/tasks-multiturn.json` plus sequence support
+  in `bench.py` are reusable for any future cross-turn question.
+
+- **Exit met:** a design question answered for about a day, with a reusable
+  harness, and a port that will not be built.
 
 ### Stage 6 — resolution, approximate and ours
 

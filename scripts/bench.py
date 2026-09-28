@@ -44,49 +44,75 @@ def tokens_before(text: str, needle: str) -> float | None:
     return None
 
 
+def invocations(task: dict) -> list[list[str]]:
+    """A task is either one call (`args`) or a sequence (`turns`).
+
+    Sequences exist because harness familiarity only shows up across turns: what
+    turn two can drop is what turn one already read. Single-call tasks are
+    unchanged, so the 25-task benchmark measures exactly as before.
+    """
+    if "turns" in task:
+        return [turn["args"] for turn in task["turns"]]
+    return [task["args"]]
+
+
 def run_task(binary: str, corpus: str, task: dict, timeout: float) -> dict:
-    cmd = [binary] + task["args"]
+    calls = invocations(task)
     result = {
         "id": task["id"],
-        "args": task["args"],
+        "args": calls[-1],
+        "turns": len(calls),
         "exit": None,
         "found": False,
         "tokens_to_answer": None,
+        "final_tokens_to_answer": None,
         "output_tokens": 0.0,
         "output_chars": 0,
         "latency_ms": None,
         "error": None,
     }
     started = time.perf_counter()
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=corpus,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        result["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
-        result["error"] = f"timeout after {timeout}s"
-        return result
+    outs: list[str] = []
+    for call in calls:
+        try:
+            proc = subprocess.run(
+                [binary] + call,
+                cwd=corpus,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            result["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
+            result["error"] = f"timeout after {timeout}s"
+            return result
+        result["exit"] = proc.returncode
+        if proc.returncode != 0 and not proc.stdout:
+            result["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
+            result["error"] = proc.stderr.strip()[:200] or "non-zero exit with no output"
+            return result
+        outs.append(proc.stdout)
 
     result["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
 
-    out = proc.stdout
-    result["exit"] = proc.returncode
+    final = outs[-1]
+    # The sequence total is what the caller paid to reach the answer; the final
+    # turn alone is what familiarity can actually move. Both are reported,
+    # because the total dilutes a per-turn effect and the final turn ignores the
+    # cost of getting there.
+    out = "\n".join(outs)
     result["output_chars"] = len(out)
     result["output_tokens"] = round(est_tokens(out), 1)
 
     needle = task.get("expect_path") or task.get("expect_symbol")
-    if proc.returncode != 0 and not out:
-        result["error"] = proc.stderr.strip()[:200] or "non-zero exit with no output"
-        return result
 
     position = tokens_before(out, needle)
     if position is not None:
         result["found"] = True
         result["tokens_to_answer"] = round(position, 1)
+    final_position = tokens_before(final, needle)
+    if final_position is not None:
+        result["final_tokens_to_answer"] = round(final_position, 1)
     return result
 
 

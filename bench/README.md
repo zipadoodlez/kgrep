@@ -465,6 +465,83 @@ where it deletes, and that its best case is a few percent. Whether that is worth
 having on top of kgrep's ranking is gate 2, which measures it against the oracle's
 ranking replaced by kgrep's.
 
+## Gate 2: could familiarity pay on top of kgrep's ranking? 2026-09-28
+
+Asked as a **bound rather than a spike**, because a bound can kill the idea and is
+cheap. `scripts/gate2.py` runs each multi-turn task, finds the tokens before the
+answer, and sums the blocks before it that belong to files the agent had already
+seen. That sum is an upper bound: it credits the mechanism with deleting those
+blocks outright, when in reality it leaves a note line and keeps six items.
+
+Seven tasks, `bench/tasks-multiturn.json`: three benign, one adversarial, three
+controls. Single-call tasks are unaffected, so the 25-task benchmark still
+measures what it measured.
+
+| task | kind | answer rank | tokens to answer | gold bound | share |
+|---|---|---|---|---|---|
+| `mt-config-repeat` | benign | 8 | 680.2 | 128.8 | 19% |
+| `mt-config-accumulate` | benign | 8 | 680.2 | 261.5 | 38% |
+| `mt-config-deep` | benign | 8 | 680.2 | 383.0 | 56% |
+| `mt-answer-is-known` | adversarial | 8 | 680.2 | 0.0 | 0% |
+| `mt-framework-first-rank-control` | control | 1 | 0.0 | 0.0 | — |
+| `mt-framework-second-control` | control | 1 | 0.0 | 0.0 | — |
+| `mt-no-overlap-control` | control | 1 | 0.0 | 0.0 | — |
+
+All three controls are exactly zero, which is the point of having them: the
+harness is not manufacturing wins from a known set that never intersects the
+query. And the benign ceiling is 19 to 56%, median 38%, so **the bound does not
+kill it**. By the letter of the kill criteria, this says keep going.
+
+### Then the check that decides it, and it contradicts the bound
+
+A bound is only as good as its proxy, and this one assumed familiarity removes a
+block. So: what is actually in that 680-token prefix?
+
+| what | chars | share |
+|---|---|---|
+| matched match lines | 2128 | 76.7% |
+| file paths | 360 | 13.0% |
+| the `symbols: N total, M matched` summary | 278 | 10.0% |
+| the inline `other:` structure line | **0** | 0.0% |
+
+The mechanism trims *structure*: the list of a file's symbols. In kgrep's output
+there is no such list to trim, because unmatched symbols are already collapsed
+into a single inline `other:` line, and in this prefix that line does not even
+appear. The 77% that dominates is matched match lines, which are the content that
+answers the question. Trimming those is not the safe saving; it is the recall
+risk.
+
+So the 19 to 56% is an artifact of crediting whole-block deletion. What the
+mechanism actually targets is at most the 10% summary line, and even that is not
+all recoverable, because it keeps six items and adds a note.
+
+### Verdict: do not port it, and not because the number is low
+
+The number is not low; the bound clears the threshold. The reason is that **the
+format the mechanism optimises no longer exists here.** kgrep already did,
+unconditionally and for free, what familiarity does conditionally with a context
+file: it collapsed the structure it was written to trim. Porting it would add a
+producer, a format, a freshness problem and a confidence calibration to buy back a
+share of a 10% line.
+
+That also settles the question this gate pair was opened with. Dropping it during
+the `trace` port was right, and the reason is better than "it was small": there
+was nothing left in kgrep's rendering for it to act on.
+
+### One thing the metric is blind to, worth recording
+
+The adversarial task shows a gold bound of 0.0, which is structurally correct: the
+answer's own block is not part of the prefix. But that is also the task where the
+risk lives, and **tokens-to-answer cannot see it.** If familiarity trims the
+answering file's structure, the file's path still appears, at the same offset, so
+the metric reports no change while the answer's symbol may have vanished into
+`... N more symbols`. Gate 1 established that structure trimming is deletion.
+
+So the recall guard the plan asked for cannot be the existing metric. It would
+have to check that the answer *symbol* survives, not that the file is named. That
+gap does not change the verdict here, but it would have corrupted a spike that
+reported only tokens.
+
 ## What this tells us
 
 > **Correction, same day. The max-output claim below is wrong for the harness
